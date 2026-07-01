@@ -1,0 +1,39 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# build output
+dist/
+build/
+*.tsbuildinfo
+
+# env & secrets — NEVER commit (Golden Rule 9)
+.env
+.env.*
+!.env.example
+
+# logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# test / coverage
+coverage/
+
+# graphify knowledge-graph output (generated, AST cache — never commit)
+graphify-out/
+
+
+# editor / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+.DS_Store
+
+# drizzle local artifacts
+drizzle/.cache/
+
+# docker / localstack volumes
+.docker-data/
+.localstack/

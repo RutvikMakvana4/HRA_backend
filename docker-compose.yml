@@ -1,0 +1,57 @@
+# Local development dependencies: Postgres + Redis + LocalStack (SQS).
+# Bring up:  pnpm up        Tear down:  pnpm down
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: hra-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hra
+      POSTGRES_PASSWORD: hra
+      POSTGRES_DB: hra
+    ports:
+      - '5432:5432'
+    volumes:
+      - hra-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U hra -d hra']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: hra-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - hra-redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:3
+    container_name: hra-localstack
+    restart: unless-stopped
+    environment:
+      SERVICES: sqs
+      DEFAULT_REGION: us-east-1
+    ports:
+      - '4566:4566'
+    volumes:
+      - hra-localstack:/var/lib/localstack
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:4566/_localstack/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  hra-pgdata:
+  hra-redisdata:
+  hra-localstack:
