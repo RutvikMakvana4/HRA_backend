@@ -1,10 +1,10 @@
 import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { Pool, type PoolConfig } from 'pg';
 import * as schema from './schema';
-// import { relations } from './relations';
+import * as relations from './relations';
 
 /** The combined schema + relations object handed to drizzle. */
-const fullSchema = { ...schema };
+const fullSchema = { ...schema, ...relations };
 
 /** Strongly-typed Drizzle database, aware of every table and relation. */
 export type Database = NodePgDatabase<typeof fullSchema>;

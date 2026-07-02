@@ -8,6 +8,27 @@
       "when": 1782907428574,
       "tag": "0000_eager_supernaut",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1782907428575,
+      "tag": "0001_module1_employee_core",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1782911830130,
+      "tag": "0002_ambitious_zemo",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1782988204069,
+      "tag": "0003_brief_frank_castle",
+      "breakpoints": true
     }
   ]
 }

@@ -34,7 +34,7 @@ async function bootstrap(): Promise<void> {
     }),
   );
 
-  // URI versioning: /v1/... player, /v1/admin/... admin, /v1/webhooks/...
+  // URI versioning. Every controller that omits `@Version` is registered at `/v1/...`.
   app.enableVersioning({
     type: VersioningType.URI,
     defaultVersion: '1',
@@ -46,9 +46,10 @@ async function bootstrap(): Promise<void> {
   // OpenAPI / Swagger. zod DTOs feed the schema via nestjs-zod; `cleanupOpenApiDoc` finalises it.
   // UI at /docs, JSON at /docs/json.
   const openApiConfig = new DocumentBuilder()
-    .setTitle('HRA Backend API')
+    .setTitle('Scalixity HRA Backend API')
     .setDescription(
-      "Real-money gaming super app — Pick'em (real-money) + Sportsbook (sweepstakes).",
+      'Internal HR software — Employee Core + Documents, Leave, Attendance, and Employee ' +
+        'Self-Service. All routes are served under /v1.',
     )
     .setVersion('1.0')
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'access-token')
