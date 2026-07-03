@@ -22,6 +22,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
+    "db:backup": "tsx src/db/backup.ts",
     "db:backfill-images": "tsx src/db/backfill-player-images.ts",
     "db:check": "drizzle-kit check",
     "db:studio": "drizzle-kit studio",
