@@ -92,3 +92,44 @@ export const regularizationStatus = pgEnum('regularization_status', [
   'approved',
   'rejected',
 ]);
+
+// ── Module 5: Onboarding / Offboarding (PRD §3) ──────────────────────────────
+
+/** A lifecycle flow is either a joining (onboarding) or an exit (offboarding). */
+export const lifecycleType = pgEnum('lifecycle_type', ['onboarding', 'offboarding']);
+
+/** Category of a checklist item/task — groups the board and drives the clearance gate. */
+export const checklistCategory = pgEnum('checklist_category', [
+  'documentation',
+  'access_provisioning',
+  'asset',
+  'orientation',
+  'compliance',
+  'clearance',
+  'handover',
+]);
+
+/** Whom a template item defaults to — resolved to a concrete employee when a case is spawned. */
+export const checklistAssigneeRole = pgEnum('checklist_assignee_role', [
+  'hr',
+  'manager',
+  'it',
+  'employee',
+]);
+
+/** Lifecycle-case status. Derived from task completion (auto-completes when mandatory tasks close). */
+export const lifecycleCaseStatus = pgEnum('lifecycle_case_status', [
+  'not_started',
+  'in_progress',
+  'completed',
+  'cancelled',
+]);
+
+/** Per-task status on a checklist board. */
+export const checklistTaskStatus = pgEnum('checklist_task_status', [
+  'pending',
+  'in_progress',
+  'done',
+  'blocked',
+  'skipped',
+]);

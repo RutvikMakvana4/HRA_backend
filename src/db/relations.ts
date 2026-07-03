@@ -4,7 +4,17 @@
  * on the table definitions in ./schema.
  */
 import { relations } from 'drizzle-orm';
-import { authSessions, departments, documents, employees, userAccounts } from './schema';
+import {
+  authSessions,
+  checklistTasks,
+  checklistTemplateItems,
+  checklistTemplates,
+  departments,
+  documents,
+  employees,
+  lifecycleCases,
+  userAccounts,
+} from './schema';
 
 export const departmentsRelations = relations(departments, ({ one, many }) => ({
   /** The employee who heads this department (soft pointer). */
@@ -61,5 +71,46 @@ export const documentsRelations = relations(documents, ({ one }) => ({
   employee: one(employees, {
     fields: [documents.employeeId],
     references: [employees.id],
+  }),
+}));
+
+// ── Module 5: Onboarding / Offboarding ───────────────────────────────────────
+
+export const checklistTemplatesRelations = relations(checklistTemplates, ({ many }) => ({
+  items: many(checklistTemplateItems),
+  cases: many(lifecycleCases),
+}));
+
+export const checklistTemplateItemsRelations = relations(checklistTemplateItems, ({ one }) => ({
+  template: one(checklistTemplates, {
+    fields: [checklistTemplateItems.templateId],
+    references: [checklistTemplates.id],
+  }),
+}));
+
+export const lifecycleCasesRelations = relations(lifecycleCases, ({ one, many }) => ({
+  employee: one(employees, {
+    fields: [lifecycleCases.employeeId],
+    references: [employees.id],
+  }),
+  template: one(checklistTemplates, {
+    fields: [lifecycleCases.templateId],
+    references: [checklistTemplates.id],
+  }),
+  tasks: many(checklistTasks),
+}));
+
+export const checklistTasksRelations = relations(checklistTasks, ({ one }) => ({
+  case: one(lifecycleCases, {
+    fields: [checklistTasks.caseId],
+    references: [lifecycleCases.id],
+  }),
+  assignee: one(employees, {
+    fields: [checklistTasks.assigneeId],
+    references: [employees.id],
+  }),
+  linkedDocument: one(documents, {
+    fields: [checklistTasks.linkedDocumentId],
+    references: [documents.id],
   }),
 }));

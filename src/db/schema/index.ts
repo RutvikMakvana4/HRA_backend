@@ -3,6 +3,7 @@ export * from './auth';
 export * from './admin';
 export * from './leave';
 export * from './attendance';
+export * from './onboarding';
 export * from './notifications';
 export * from './enums';
 export * from './_conventions';

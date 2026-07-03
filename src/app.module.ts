@@ -18,6 +18,7 @@ import { DepartmentsModule } from './modules/departments/departments.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { LeaveModule } from './modules/leave/leave.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
+import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { EssModule } from './modules/ess/ess.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { BodyCaseMiddleware } from './common/middleware/body-case.middleware';
@@ -77,6 +78,9 @@ import { ResponseCaseInterceptor } from './common/interceptors/response-case.int
     LeaveModule,
     AttendanceModule,
     EssModule,
+
+    // Module 5 — Onboarding / Offboarding
+    OnboardingModule,
   ],
   providers: [
     // HTTP-only global enhancers (kept out of CommonModule so the worker doesn't load them):
