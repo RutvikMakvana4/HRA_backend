@@ -1,9 +1,10 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { and, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
+import { and, eq, getTableColumns, ilike, or, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { Database } from '../../db/client';
-import { employees, type Employee } from '../../db/schema';
+import { departments, employees, userAccounts, type Employee } from '../../db/schema';
 import { DRIZZLE } from '../../common/constants';
-import { AppError, ErrorCode } from '../../common/errors/app-error';
+import { AppError, ErrorCode, pgErrorCode } from '../../common/errors/app-error';
 import { AUDIT_SERVICE, type AuditService } from '../../common/audit/audit.interface';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { isAdminOrAbove } from '../auth/roles';
@@ -37,10 +38,12 @@ export class EmployeesService {
   async create(dto: CreateEmployeeDto, actor: AuthenticatedUser): Promise<Employee> {
     if (dto.managerId) await this.assertManagerExists(dto.managerId);
 
+    // The UI renders displayName everywhere; default it so it is never null.
+    const displayName = dto.displayName ?? `${dto.firstName} ${dto.lastName}`.trim();
     const [row] = await this.runMapped(() =>
       this.db
         .insert(employees)
-        .values({ ...dto, createdBy: actor.id, updatedBy: actor.id })
+        .values({ ...dto, displayName, createdBy: actor.id, updatedBy: actor.id })
         .returning(),
     );
     if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to create employee');
@@ -57,7 +60,7 @@ export class EmployeesService {
 
   /** Filtered, paginated list (HR/Admin). */
   async list(query: ListEmployeesQueryDto): Promise<{
-    data: Employee[];
+    data: Array<Employee & { departmentName: string | null; managerName: string | null }>;
     page: number;
     pageSize: number;
     total: number;
@@ -86,9 +89,17 @@ export class EmployeesService {
       .where(where);
     const total = countRows[0]?.total ?? 0;
 
+    // Joined names ride along so list screens don't need N+1 lookups.
+    const managers = alias(employees, 'managers');
     const data = await this.db
-      .select()
+      .select({
+        ...getTableColumns(employees),
+        departmentName: departments.name,
+        managerName: sql<string | null>`coalesce(${managers.displayName}, ${managers.firstName} || ' ' || ${managers.lastName})`,
+      })
       .from(employees)
+      .leftJoin(departments, eq(employees.departmentId, departments.id))
+      .leftJoin(managers, eq(employees.managerId, managers.id))
       .where(where)
       .orderBy(employees.employeeCode)
       .limit(query.pageSize)
@@ -111,7 +122,40 @@ export class EmployeesService {
     if (!hr && !isSelf && !(await this.isManagerOf(actor.id, id))) {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to view this employee', HttpStatus.FORBIDDEN);
     }
-    return hr ? employee : this.redact(employee);
+    const [account] = await this.db
+      .select({ id: userAccounts.id })
+      .from(userAccounts)
+      .where(eq(userAccounts.employeeId, id))
+      .limit(1);
+    const decorated = {
+      ...(await this.withNames(employee)),
+      hasAccount: Boolean(account),
+      accountId: account?.id ?? null,
+    };
+    return hr ? decorated : this.redact(decorated);
+  }
+
+  /** Attach display names for the employee's department and manager. */
+  private async withNames<T extends Pick<Employee, 'departmentId' | 'managerId'>>(
+    row: T,
+  ): Promise<T & { departmentName: string | null; managerName: string | null }> {
+    const [dept] = row.departmentId
+      ? await this.db
+          .select({ name: departments.name })
+          .from(departments)
+          .where(eq(departments.id, row.departmentId))
+          .limit(1)
+      : [];
+    const [manager] = row.managerId
+      ? await this.db
+          .select({
+            name: sql<string>`coalesce(${employees.displayName}, ${employees.firstName} || ' ' || ${employees.lastName})`,
+          })
+          .from(employees)
+          .where(eq(employees.id, row.managerId))
+          .limit(1)
+      : [];
+    return { ...row, departmentName: dept?.name ?? null, managerName: manager?.name ?? null };
   }
 
   /** HR/Admin partial update. Immutable identity fields are absent from the DTO by construction. */
@@ -124,7 +168,12 @@ export class EmployeesService {
     if (dto.managerId !== undefined && dto.managerId !== null) {
       await this.assertNoCycle(id, dto.managerId);
     }
-    return this.applyUpdate(id, { ...dto }, before, actor, 'employee.update');
+    // Keep displayName in step with a name change unless the caller set it explicitly.
+    const patch: UpdateEmployeeDto & { displayName?: string } = { ...dto };
+    if ((dto.firstName || dto.lastName) && !dto.displayName) {
+      patch.displayName = `${dto.firstName ?? before.firstName} ${dto.lastName ?? before.lastName}`.trim();
+    }
+    return this.applyUpdate(id, { ...patch }, before, actor, 'employee.update');
   }
 
   /** Self-service update of the narrow ESS-editable subset on the caller's own record. */
@@ -295,7 +344,7 @@ export class EmployeesService {
     try {
       return await work();
     } catch (err) {
-      const code = this.pgErrorCode(err);
+      const code = pgErrorCode(err);
       if (code === '23505') {
         throw new AppError(
           ErrorCode.CONFLICT,
@@ -308,13 +357,5 @@ export class EmployeesService {
       }
       throw err;
     }
-  }
-
-  private pgErrorCode(err: unknown): string | undefined {
-    if (typeof err === 'object' && err !== null && 'code' in err) {
-      const code: unknown = err.code;
-      return typeof code === 'string' ? code : undefined;
-    }
-    return undefined;
   }
 }
