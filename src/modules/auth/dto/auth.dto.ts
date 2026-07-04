@@ -6,8 +6,9 @@ export const loginSchema = z.object({
   password: z.string().min(1).max(128),
 });
 
+// Optional: browser clients send the token via the httpOnly cookie instead.
 export const refreshSchema = z.object({
-  refreshToken: z.string().min(1),
+  refreshToken: z.string().min(1).optional(),
 });
 
 export const changePasswordSchema = z.object({

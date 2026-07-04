@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ZodValidationPipe, cleanupOpenApiDoc } from 'nestjs-zod';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module';
@@ -19,6 +20,9 @@ async function bootstrap(): Promise<void> {
 
   // Route pino through Nest's logger so framework logs are structured too.
   app.useLogger(app.get(Logger));
+
+  // The refresh token travels in an httpOnly cookie; this parses it off requests.
+  app.use(cookieParser());
 
   // helmet, with CSP relaxed only enough for the Swagger UI assets to load.
   app.use(
