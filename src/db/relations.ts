@@ -9,10 +9,18 @@ import {
   checklistTasks,
   checklistTemplateItems,
   checklistTemplates,
+  clients,
   departments,
   documents,
   employees,
+  expenseCategories,
+  expenseClaims,
+  expenseLineItems,
   lifecycleCases,
+  projectAllocations,
+  projects,
+  timesheetEntries,
+  timesheetWeeks,
   userAccounts,
 } from './schema';
 
@@ -111,6 +119,77 @@ export const checklistTasksRelations = relations(checklistTasks, ({ one }) => ({
   }),
   linkedDocument: one(documents, {
     fields: [checklistTasks.linkedDocumentId],
+    references: [documents.id],
+  }),
+}));
+
+// ── Module 7: Timesheets + Project Allocation ────────────────────────────────
+
+export const clientsRelations = relations(clients, ({ many }) => ({
+  projects: many(projects),
+}));
+
+export const projectsRelations = relations(projects, ({ one, many }) => ({
+  client: one(clients, { fields: [projects.clientId], references: [clients.id] }),
+  pm: one(employees, { fields: [projects.pmEmployeeId], references: [employees.id] }),
+  allocations: many(projectAllocations),
+  timesheetEntries: many(timesheetEntries),
+}));
+
+export const projectAllocationsRelations = relations(projectAllocations, ({ one }) => ({
+  project: one(projects, { fields: [projectAllocations.projectId], references: [projects.id] }),
+  employee: one(employees, {
+    fields: [projectAllocations.employeeId],
+    references: [employees.id],
+  }),
+}));
+
+export const timesheetWeeksRelations = relations(timesheetWeeks, ({ one, many }) => ({
+  employee: one(employees, {
+    fields: [timesheetWeeks.employeeId],
+    references: [employees.id],
+  }),
+  entries: many(timesheetEntries),
+}));
+
+export const timesheetEntriesRelations = relations(timesheetEntries, ({ one }) => ({
+  week: one(timesheetWeeks, {
+    fields: [timesheetEntries.weekId],
+    references: [timesheetWeeks.id],
+  }),
+  project: one(projects, { fields: [timesheetEntries.projectId], references: [projects.id] }),
+  employee: one(employees, {
+    fields: [timesheetEntries.employeeId],
+    references: [employees.id],
+  }),
+}));
+
+// ── Module 6: Expenses & Reimbursement ───────────────────────────────────────
+
+export const expenseCategoriesRelations = relations(expenseCategories, ({ many }) => ({
+  lineItems: many(expenseLineItems),
+}));
+
+export const expenseClaimsRelations = relations(expenseClaims, ({ one, many }) => ({
+  employee: one(employees, {
+    fields: [expenseClaims.employeeId],
+    references: [employees.id],
+  }),
+  project: one(projects, { fields: [expenseClaims.projectId], references: [projects.id] }),
+  lineItems: many(expenseLineItems),
+}));
+
+export const expenseLineItemsRelations = relations(expenseLineItems, ({ one }) => ({
+  claim: one(expenseClaims, {
+    fields: [expenseLineItems.claimId],
+    references: [expenseClaims.id],
+  }),
+  category: one(expenseCategories, {
+    fields: [expenseLineItems.categoryId],
+    references: [expenseCategories.id],
+  }),
+  receipt: one(documents, {
+    fields: [expenseLineItems.receiptDocumentId],
     references: [documents.id],
   }),
 }));

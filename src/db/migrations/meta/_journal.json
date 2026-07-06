@@ -36,6 +36,13 @@
       "when": 1783060688089,
       "tag": "0004_fuzzy_stryfe",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1783143497515,
+      "tag": "0005_open_gabe_jones",
+      "breakpoints": true
     }
   ]
 }
