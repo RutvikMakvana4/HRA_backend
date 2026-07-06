@@ -5,6 +5,7 @@ import {
   Get,
   Param,
   ParseUUIDPipe,
+  Patch,
   Post,
   Query,
   UseGuards,
@@ -21,8 +22,11 @@ import {
   CreateHolidayDto,
   CreateLeaveTypeDto,
   DecideLeaveDto,
+  GrantPerPolicyDto,
   ListHolidaysDto,
   ListLeaveRequestsDto,
+  SetLeaveBalanceDto,
+  UpdateLeaveTypeDto,
 } from './dto/leave.dto';
 
 const ADMIN_ROLES = [Role.ADMIN, Role.SUPER_ADMIN] as const;
@@ -44,6 +48,16 @@ export class LeaveTypesController {
   @Roles([...ADMIN_ROLES])
   create(@Body() dto: CreateLeaveTypeDto, @CurrentUser() actor: AuthenticatedUser) {
     return this.leave.createLeaveType(dto, actor);
+  }
+
+  @Patch(':id')
+  @Roles([...ADMIN_ROLES])
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateLeaveTypeDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.leave.updateLeaveType(id, dto, actor);
   }
 }
 
@@ -89,6 +103,20 @@ export class LeaveBalancesController {
   @Get()
   list(@Query('employee_id') employeeId: string | undefined, @CurrentUser() actor: AuthenticatedUser) {
     return this.leave.listBalances(employeeId, actor);
+  }
+
+  /** Set (or correct) an employee's yearly accrued days until accrual automation lands. */
+  @Post('set')
+  @Roles([...ADMIN_ROLES])
+  set(@Body() dto: SetLeaveBalanceDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.leave.setBalance(dto, actor);
+  }
+
+  /** One-click new-joiner grant: every accruing type's entitlement, existing rows untouched. */
+  @Post('grant-per-policy')
+  @Roles([...ADMIN_ROLES])
+  grantPerPolicy(@Body() dto: GrantPerPolicyDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.leave.grantPerPolicy(dto, actor);
   }
 }
 

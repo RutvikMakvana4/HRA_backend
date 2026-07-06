@@ -10,7 +10,7 @@ import {
   type Holiday,
   type LeaveType,
 } from '../../db/schema';
-import { DRIZZLE } from '../../common/constants';
+import { DRIZZLE, WEEKLY_OFF_DAYS } from '../../common/constants';
 import { AppError, ErrorCode } from '../../common/errors/app-error';
 import { AUDIT_SERVICE, type AuditService } from '../../common/audit/audit.interface';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
@@ -20,7 +20,10 @@ import type {
   ApplyLeaveDto,
   CreateHolidayDto,
   CreateLeaveTypeDto,
+  GrantPerPolicyDto,
   ListHolidaysDto,
+  SetLeaveBalanceDto,
+  UpdateLeaveTypeDto,
 } from './dto/leave.dto';
 
 const OPEN_STATUSES = ['pending', 'approved'] as const;
@@ -37,8 +40,29 @@ export class LeaveService {
 
   // ── Leave types ──────────────────────────────────────────────────────────
 
-  listLeaveTypes(): Promise<LeaveType[]> {
-    return this.db.select().from(leaveTypes).orderBy(asc(leaveTypes.name));
+  /** Types + the computed yearly entitlement, so clients never do policy math. */
+  async listLeaveTypes(): Promise<Array<LeaveType & { annualEntitlement: number | null }>> {
+    const rows = await this.db.select().from(leaveTypes).orderBy(asc(leaveTypes.name));
+    return rows.map((t) => ({
+      ...t,
+      annualEntitlement: this.entitlementFromPolicy(t.accrualPolicy),
+    }));
+  }
+
+  /**
+   * The yearly total a type's accrual policy adds up to — THE source of truth
+   * for grant defaults. Null = no accrual (comp-off/unpaid), granted separately.
+   * Pro-rating for mid-year joiners can slot in here later.
+   */
+  private entitlementFromPolicy(policy: unknown): number | null {
+    const p = policy as {
+      method?: string;
+      rate?: number;
+      cap?: number | null;
+    } | null;
+    if (!p || p.method === 'none') return null;
+    const total = p.method === 'monthly' ? (p.rate ?? 0) * 12 : (p.rate ?? 0);
+    return p.cap != null ? Math.min(total, p.cap) : total;
   }
 
   async createLeaveType(dto: CreateLeaveTypeDto, actor: AuthenticatedUser): Promise<LeaveType> {
@@ -51,6 +75,32 @@ export class LeaveService {
       actorId: actor.id,
       action: 'leave_type.create',
       target: `leave_type:${row.id}`,
+      after: { ...row },
+    });
+    return row;
+  }
+
+  /** Update a leave type's policy fields (HR/Admin). `code` is immutable. */
+  async updateLeaveType(
+    id: string,
+    dto: UpdateLeaveTypeDto,
+    actor: AuthenticatedUser,
+  ): Promise<LeaveType> {
+    const before = await this.getLeaveType(id);
+    const [row] = await this.mapWrite(() =>
+      this.db
+        .update(leaveTypes)
+        .set({ ...dto, updatedAt: new Date() })
+        .where(eq(leaveTypes.id, id))
+        .returning(),
+    );
+    if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to update leave type');
+    await this.audit.record({
+      actorType: actor.type,
+      actorId: actor.id,
+      action: 'leave_type.update',
+      target: `leave_type:${id}`,
+      before: { ...before },
       after: { ...row },
     });
     return row;
@@ -107,7 +157,7 @@ export class LeaveService {
     }
 
     const daysCount = dto.isHalfDay
-      ? 1
+      ? 0.5
       : await this.workingDays(dto.startDate, dto.endDate, employee.workLocation);
     if (daysCount <= 0) {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'Selected range has no working days');
@@ -246,6 +296,85 @@ export class LeaveService {
     }));
   }
 
+  /**
+   * Set an employee's accrued days for the year (HR/Admin) — the stop-gap
+   * until accrual automation lands. Absolute, not incremental: repeating the
+   * call is harmless (idempotent) and calling it with a new number IS the
+   * edit. `used`/`pending` are never touched.
+   */
+  async setBalance(dto: SetLeaveBalanceDto, actor: AuthenticatedUser) {
+    await this.employeesService.ensureExists(dto.employeeId);
+    await this.getLeaveType(dto.leaveTypeId);
+    const year = dto.year ?? new Date().getFullYear();
+
+    await this.db
+      .insert(leaveBalances)
+      .values({
+        employeeId: dto.employeeId,
+        leaveTypeId: dto.leaveTypeId,
+        year,
+        accrued: dto.days,
+      })
+      .onConflictDoUpdate({
+        target: [leaveBalances.employeeId, leaveBalances.leaveTypeId, leaveBalances.year],
+        set: {
+          accrued: dto.days,
+          updatedAt: new Date(),
+        },
+      });
+
+    await this.audit.record({
+      actorType: actor.type,
+      actorId: actor.id,
+      action: 'leave.balance.set',
+      target: `employee:${dto.employeeId}`,
+      after: { leaveTypeId: dto.leaveTypeId, year, accrued: dto.days },
+    });
+    return this.listBalances(dto.employeeId, actor);
+  }
+
+  /**
+   * Grant every accruing type's yearly entitlement to an employee (HR/Admin) —
+   * the one-click new-joiner setup. Skips types that already have a balance
+   * row for the year (never overwrites a custom grant) and types without
+   * accrual (comp-off), so repeating the call is harmless.
+   */
+  async grantPerPolicy(dto: GrantPerPolicyDto, actor: AuthenticatedUser) {
+    await this.employeesService.ensureExists(dto.employeeId);
+    const year = dto.year ?? new Date().getFullYear();
+
+    const types = await this.db.select().from(leaveTypes);
+    const existing = await this.db
+      .select({ leaveTypeId: leaveBalances.leaveTypeId })
+      .from(leaveBalances)
+      .where(and(eq(leaveBalances.employeeId, dto.employeeId), eq(leaveBalances.year, year)));
+    const alreadySet = new Set(existing.map((r) => r.leaveTypeId));
+
+    const grants = types
+      .map((t) => ({ leaveTypeId: t.id, days: this.entitlementFromPolicy(t.accrualPolicy) }))
+      .filter((g): g is { leaveTypeId: string; days: number } => g.days !== null)
+      .filter((g) => !alreadySet.has(g.leaveTypeId));
+
+    if (grants.length) {
+      await this.db.insert(leaveBalances).values(
+        grants.map((g) => ({
+          employeeId: dto.employeeId,
+          leaveTypeId: g.leaveTypeId,
+          year,
+          accrued: g.days,
+        })),
+      );
+      await this.audit.record({
+        actorType: actor.type,
+        actorId: actor.id,
+        action: 'leave.balance.grant_per_policy',
+        target: `employee:${dto.employeeId}`,
+        after: { year, grants },
+      });
+    }
+    return this.listBalances(dto.employeeId, actor);
+  }
+
   // ── Holidays ──────────────────────────────────────────────────────────────
 
   listHolidays(query: ListHolidaysDto): Promise<Holiday[]> {
@@ -376,7 +505,7 @@ export class LeaveService {
     }
   }
 
-  /** Working days in [start, end] inclusive, excluding weekends and the location's holidays. */
+  /** Working days in [start, end] inclusive, excluding weekly offs and the location's holidays. */
   private async workingDays(start: string, end: string, location: string): Promise<number> {
     const holidaySet = new Set<string>();
     if (location === 'india' || location === 'uk') {
@@ -389,7 +518,7 @@ export class LeaveService {
     let count = 0;
     for (let d = new Date(`${start}T00:00:00Z`); d <= new Date(`${end}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + 1)) {
       const day = d.getUTCDay();
-      if (day === 0 || day === 6) continue;
+      if (WEEKLY_OFF_DAYS.has(day)) continue;
       const iso = d.toISOString().slice(0, 10);
       if (holidaySet.has(iso)) continue;
       count++;
