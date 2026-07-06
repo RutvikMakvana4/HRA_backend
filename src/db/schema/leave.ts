@@ -6,7 +6,7 @@
  *  - `leaveBalances` — per employee / type / year running totals (accrued/used/pending/carried).
  *  - `leaveRequests` — apply → approve/reject/cancel workflow.
  */
-import { boolean, date, index, integer, jsonb, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
+import { boolean, date, index, integer, jsonb, pgTable, real, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 import { timestamps, uuidPk } from './_conventions';
 import { employees } from './employees';
 import { halfDayPeriod, holidayLocation, leaveLocation, leaveStatus } from './enums';
@@ -63,10 +63,11 @@ export const leaveBalances = pgTable(
       .notNull()
       .references(() => leaveTypes.id, { onDelete: 'cascade' }),
     year: integer('year').notNull(),
-    accrued: integer('accrued').notNull().default(0),
-    used: integer('used').notNull().default(0),
-    pending: integer('pending').notNull().default(0),
-    carriedForward: integer('carried_forward').notNull().default(0),
+    // Half-day leave books 0.5, so day totals are fractional (in .5 steps).
+    accrued: real('accrued').notNull().default(0),
+    used: real('used').notNull().default(0),
+    pending: real('pending').notNull().default(0),
+    carriedForward: real('carried_forward').notNull().default(0),
     ...timestamps,
   },
   (t) => ({
@@ -90,7 +91,7 @@ export const leaveRequests = pgTable(
     endDate: date('end_date').notNull(),
     isHalfDay: boolean('is_half_day').notNull().default(false),
     halfDayPeriod: halfDayPeriod('half_day_period'),
-    daysCount: integer('days_count').notNull(),
+    daysCount: real('days_count').notNull(),
     reason: text('reason'),
     status: leaveStatus('status').notNull().default('pending'),
     approverId: uuid('approver_id').references(() => employees.id, { onDelete: 'set null' }),
