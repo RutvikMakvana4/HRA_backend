@@ -50,6 +50,8 @@ export class AdminUsersService {
           employeeId: dto.employeeId,
           role: dto.role,
           passwordHash,
+          // HR-issued temporary password — force a change on first login.
+          mustChangePassword: true,
           createdBy: actor.id,
           updatedBy: actor.id,
         })
@@ -136,7 +138,8 @@ export class AdminUsersService {
     // An admin must not be able to take over admin/super-admin accounts.
     this.assertCanTouchRole(actor, target.role);
     const passwordHash = await this.passwords.hash(dto.newPassword);
-    await this.applyChange(accountId, { passwordHash }, actor);
+    // Reset issues a temporary password, so force a change on next login.
+    await this.applyChange(accountId, { passwordHash, mustChangePassword: true }, actor);
     await this.sessions.revokeAllForUser(accountId);
     await this.audit.record({
       actorType: actor.type,
@@ -163,7 +166,7 @@ export class AdminUsersService {
 
   private async applyChange(
     accountId: string,
-    patch: Partial<Pick<UserAccount, 'role' | 'status' | 'passwordHash'>>,
+    patch: Partial<Pick<UserAccount, 'role' | 'status' | 'passwordHash' | 'mustChangePassword'>>,
     actor: AuthenticatedUser,
   ): Promise<UserAccount> {
     const [row] = await this.db

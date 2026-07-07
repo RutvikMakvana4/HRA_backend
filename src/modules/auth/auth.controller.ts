@@ -89,6 +89,7 @@ export class AuthController {
       id: actor.id,
       accountId: actor.uid,
       roles: actor.roles,
+      mustChangePassword: await this.auth.passwordChangeRequired(actor.uid),
       profile,
     };
   }

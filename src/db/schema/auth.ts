@@ -7,7 +7,7 @@
  *    (`sid`) carried in the access token and mirrored to a Redis `session:<sid>` flag for instant
  *    revocation. Refresh tokens are stored hashed, never in plaintext.
  */
-import { index, inet, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
+import { boolean, index, inet, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 import { timestamps } from './_conventions';
 import { accountStatus, userRole } from './enums';
 import { employees } from './employees';
@@ -23,6 +23,8 @@ export const userAccounts = pgTable(
     role: userRole('role').notNull().default('employee'),
     passwordHash: text('password_hash').notNull(),
     status: accountStatus('status').notNull().default('active'),
+    /** True while the password is an HR-issued temporary one — forces a change on first login. */
+    mustChangePassword: boolean('must_change_password').notNull().default(false),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
     ...timestamps,
     createdBy: uuid('created_by'),

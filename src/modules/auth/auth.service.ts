@@ -23,7 +23,7 @@ export interface AuthTokens {
   refreshToken: string;
   tokenType: 'Bearer';
   expiresIn: number;
-  user: { employeeId: string; accountId: string; role: Role };
+  user: { employeeId: string; accountId: string; role: Role; mustChangePassword: boolean };
 }
 
 export interface RequestMeta {
@@ -133,7 +133,8 @@ export class AuthService {
     const passwordHash = await this.passwords.hash(dto.newPassword);
     await this.db
       .update(userAccounts)
-      .set({ passwordHash, updatedAt: new Date(), updatedBy: actor.id })
+      // The chosen password is now the real one — clear the forced-change flag.
+      .set({ passwordHash, mustChangePassword: false, updatedAt: new Date(), updatedBy: actor.id })
       .where(eq(userAccounts.id, account.id));
     await this.sessions.revokeAllForUser(account.id);
     await this.audit.record({
@@ -169,8 +170,19 @@ export class AuthService {
       refreshToken: refresh.token,
       tokenType: 'Bearer',
       expiresIn: access.expiresIn,
-      user: { employeeId: account.employeeId, accountId: account.id, role: account.role },
+      user: {
+        employeeId: account.employeeId,
+        accountId: account.id,
+        role: account.role,
+        mustChangePassword: account.mustChangePassword,
+      },
     };
+  }
+
+  /** Whether the account still holds an HR-issued temporary password. */
+  async passwordChangeRequired(accountId: string): Promise<boolean> {
+    const account = await this.loadAccount(accountId);
+    return account?.mustChangePassword ?? false;
   }
 
   private loadAccount(id: string): Promise<UserAccount | undefined> {

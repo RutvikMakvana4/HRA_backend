@@ -43,6 +43,13 @@
       "when": 1783321783900,
       "tag": "0005_zippy_lethal_legion",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1783410186608,
+      "tag": "0006_daily_next_avengers",
+      "breakpoints": true
     }
   ]
 }
