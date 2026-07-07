@@ -40,10 +40,12 @@ export class EmployeesService {
 
     // The UI renders displayName everywhere; default it so it is never null.
     const displayName = dto.displayName ?? `${dto.firstName} ${dto.lastName}`.trim();
+    // Codes are canonically upper-case, so uniqueness is effectively case-insensitive.
+    const employeeCode = dto.employeeCode.toUpperCase();
     const [row] = await this.runMapped(() =>
       this.db
         .insert(employees)
-        .values({ ...dto, displayName, createdBy: actor.id, updatedBy: actor.id })
+        .values({ ...dto, employeeCode, displayName, createdBy: actor.id, updatedBy: actor.id })
         .returning(),
     );
     if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to create employee');
@@ -56,6 +58,18 @@ export class EmployeesService {
       after: this.redact(row),
     });
     return row;
+  }
+
+  /** Whether an employee code is free. Case-insensitive: codes are stored upper-case. */
+  async isEmployeeCodeAvailable(code: string): Promise<{ available: boolean }> {
+    const normalized = code?.trim().toUpperCase() ?? '';
+    if (!normalized) return { available: false };
+    const [row] = await this.db
+      .select({ id: employees.id })
+      .from(employees)
+      .where(eq(employees.employeeCode, normalized))
+      .limit(1);
+    return { available: !row };
   }
 
   /** Filtered, paginated list (HR/Admin). */
