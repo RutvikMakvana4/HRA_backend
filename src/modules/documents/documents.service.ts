@@ -114,6 +114,13 @@ export class DocumentsService {
   /** Soft-delete a document (HR/Admin). The S3 object is retained (compliance retention). */
   async softDelete(documentId: string, actor: AuthenticatedUser): Promise<{ id: string }> {
     const doc = await this.getActiveOrThrow(documentId);
+    if (!isAdminOrAbove(actor) && doc.uploadedBy !== actor.id) {
+      throw new AppError(
+        ErrorCode.FORBIDDEN,
+        'You can only delete documents you uploaded',
+        HttpStatus.FORBIDDEN,
+      );
+    }
     await this.db
       .update(documents)
       .set({ deletedAt: new Date() })
