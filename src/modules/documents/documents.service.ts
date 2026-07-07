@@ -32,6 +32,17 @@ export class DocumentsService {
     dto: CreateDocumentDto,
     actor: AuthenticatedUser,
   ): Promise<CreatedDocument> {
+    const isHr = isAdminOrAbove(actor);
+    if (!isHr && employeeId !== actor.id) {
+      throw new AppError(
+        ErrorCode.FORBIDDEN,
+        'You can only upload documents to your own profile',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    // Employees may only create documents visible to themselves; never hr_only.
+    const visibility = isHr ? dto.visibility : 'employee_visible';
+
     await this.employeesService.ensureExists(employeeId);
     const fileKey = this.storage.buildDocumentKey(employeeId, dto.filename);
 
@@ -44,7 +55,7 @@ export class DocumentsService {
         fileKey,
         mimeType: dto.mimeType,
         sizeBytes: dto.sizeBytes,
-        visibility: dto.visibility,
+        visibility,
         uploadedBy: actor.id,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
       })
