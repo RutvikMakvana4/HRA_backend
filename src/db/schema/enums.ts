@@ -133,3 +133,43 @@ export const checklistTaskStatus = pgEnum('checklist_task_status', [
   'blocked',
   'skipped',
 ]);
+
+// ── Module 6: Expenses & Reimbursement (PRD §4) ──────────────────────────────
+
+/** Supported claim currencies. Multi-currency, no FX conversion in V2 (report per currency). */
+export const currency = pgEnum('currency', ['INR', 'GBP']);
+
+/** Expense-claim lifecycle. `reimbursed` is the terminal Finance transition (no money movement). */
+export const expenseClaimStatus = pgEnum('expense_claim_status', [
+  'draft',
+  'submitted',
+  'approved',
+  'rejected',
+  'reimbursed',
+  'cancelled',
+]);
+
+// ── Module 7: Timesheets + Project Allocation (PRD §5) ───────────────────────
+
+/** Client lifecycle. */
+export const clientStatus = pgEnum('client_status', ['active', 'inactive']);
+
+/** Project nature — `internal` projects have no client. */
+export const projectType = pgEnum('project_type', ['client', 'internal']);
+
+/** Project lifecycle. */
+export const projectStatus = pgEnum('project_status', [
+  'planned',
+  'active',
+  'on_hold',
+  'completed',
+  'archived',
+]);
+
+/** Timesheet lifecycle — managed at the week level; entries inherit it. */
+export const timesheetStatus = pgEnum('timesheet_status', [
+  'draft',
+  'submitted',
+  'approved',
+  'rejected',
+]);

@@ -4,6 +4,8 @@ export * from './admin';
 export * from './leave';
 export * from './attendance';
 export * from './onboarding';
+export * from './projects';
+export * from './expenses';
 export * from './notifications';
 export * from './enums';
 export * from './_conventions';

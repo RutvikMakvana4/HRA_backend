@@ -19,6 +19,8 @@ import { DocumentsModule } from './modules/documents/documents.module';
 import { LeaveModule } from './modules/leave/leave.module';
 import { AttendanceModule } from './modules/attendance/attendance.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
+import { TimesheetsModule } from './modules/timesheets/timesheets.module';
+import { ExpensesModule } from './modules/expenses/expenses.module';
 import { EssModule } from './modules/ess/ess.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { BodyCaseMiddleware } from './common/middleware/body-case.middleware';
@@ -81,6 +83,12 @@ import { ResponseCaseInterceptor } from './common/interceptors/response-case.int
 
     // Module 5 — Onboarding / Offboarding
     OnboardingModule,
+
+    // Module 7 — Timesheets + Project Allocation (foundation for Module 6 project tagging)
+    TimesheetsModule,
+
+    // Module 6 — Expenses & Reimbursement
+    ExpensesModule,
   ],
   providers: [
     // HTTP-only global enhancers (kept out of CommonModule so the worker doesn't load them):
