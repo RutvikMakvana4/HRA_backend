@@ -237,11 +237,12 @@ export class OnboardingService {
       }
     }
 
-    return this.db
+    const cases = await this.db
       .select({
         id: lifecycleCases.id,
         employeeId: lifecycleCases.employeeId,
         employeeName: this.nameExpr(),
+        employeeDesignation: employees.designation,
         type: lifecycleCases.type,
         status: lifecycleCases.status,
         anchorDate: lifecycleCases.anchorDate,
@@ -255,6 +256,32 @@ export class OnboardingService {
       .innerJoin(employees, eq(employees.id, lifecycleCases.employeeId))
       .where(filters.length ? and(...filters) : undefined)
       .orderBy(desc(lifecycleCases.createdAt));
+
+    if (cases.length === 0) return [];
+
+    const taskRows = await this.db
+      .select({
+        caseId: checklistTasks.caseId,
+        status: checklistTasks.status,
+        isMandatory: checklistTasks.isMandatory,
+        category: checklistTasks.category,
+      })
+      .from(checklistTasks)
+      .where(inArray(checklistTasks.caseId, cases.map((c) => c.id)));
+
+    return cases.map((c) => {
+      const ts = taskRows.filter((t) => t.caseId === c.id);
+      const doneCount = ts.filter((t) => CLOSED_STATUSES.includes(t.status as never)).length;
+      const clearanceBlocked =
+        c.type === 'offboarding' &&
+        ts.some(
+          (t) =>
+            t.isMandatory &&
+            CLEARANCE_CATEGORIES.includes(t.category as never) &&
+            !CLOSED_STATUSES.includes(t.status as never),
+        );
+      return { ...c, taskCount: ts.length, doneCount, clearanceBlocked };
+    });
   }
 
   /** A case with its tasks, progress, and (offboarding) clearance-gate state. */
@@ -294,7 +321,24 @@ export class OnboardingService {
             .every((t) => CLOSED_STATUSES.includes(t.status as never))
         : null;
 
-    return { ...kase, tasks, clearanceComplete };
+    const [emp] = await this.db
+      .select({ name: this.nameExpr(), designation: employees.designation })
+      .from(employees)
+      .where(eq(employees.id, kase.employeeId))
+      .limit(1);
+    const doneCount = tasks.filter((t) => CLOSED_STATUSES.includes(t.status as never)).length;
+    const clearanceBlocked = kase.type === 'offboarding' && clearanceComplete === false;
+
+    return {
+      ...kase,
+      employeeName: emp?.name ?? null,
+      employeeDesignation: emp?.designation ?? null,
+      tasks,
+      clearanceComplete,
+      clearanceBlocked,
+      doneCount,
+      taskCount: tasks.length,
+    };
   }
 
   async cancelCase(id: string, note: string | undefined, actor: AuthenticatedUser) {
