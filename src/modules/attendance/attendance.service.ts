@@ -244,6 +244,15 @@ export class AttendanceService {
       patch[k] = (k === 'checkIn' || k === 'checkOut') && typeof v === 'string' ? new Date(v) : v;
     }
     if (Object.keys(patch).length === 0) return;
+
+    // Recompute worked minutes from the resulting timestamps, mirroring
+    // updateByHr — otherwise a correction that fills both times leaves hours null.
+    const before = await this.getRecord(recordId);
+    const checkIn = (patch.checkIn as Date | undefined) ?? before.checkIn;
+    const checkOut = (patch.checkOut as Date | undefined) ?? before.checkOut;
+    patch.totalMinutes =
+      checkIn && checkOut ? Math.max(0, Math.round((checkOut.getTime() - checkIn.getTime()) / 60000)) : null;
+
     await this.db
       .update(attendanceRecords)
       .set({ ...patch, source: 'hr_edit', updatedAt: new Date() })

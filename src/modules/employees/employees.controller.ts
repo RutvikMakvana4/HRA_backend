@@ -51,6 +51,13 @@ export class EmployeesController {
     return this.employees.findByIdForViewer(actor.id, actor);
   }
 
+  /** Live uniqueness check for the create form (HR/Admin). Declared before `:id`. */
+  @Get('check-code')
+  @Roles([...ADMIN_ROLES])
+  checkCode(@Query('code') code: string) {
+    return this.employees.isEmployeeCodeAvailable(code);
+  }
+
   /** Self-service edit of the caller's own limited profile fields (ESS). */
   @Patch('me')
   updateMe(@Body() dto: UpdateMyProfileDto, @CurrentUser() actor: AuthenticatedUser) {

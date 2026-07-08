@@ -3,12 +3,13 @@ import { desc, eq } from 'drizzle-orm';
 import type { Database } from '../../db/client';
 import { employees, userAccounts, type UserAccount } from '../../db/schema';
 import { DRIZZLE } from '../../common/constants';
-import { AppError, ErrorCode } from '../../common/errors/app-error';
+import { AppError, ErrorCode, pgErrorCode } from '../../common/errors/app-error';
 import { AUDIT_SERVICE, type AuditService } from '../../common/audit/audit.interface';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { EmployeesService } from '../employees/employees.service';
 import { PasswordService } from './password.service';
 import { SessionService } from './session.service';
+import { isSuperAdmin, Role } from './roles';
 import type {
   CreateUserAccountDto,
   ResetPasswordDto,
@@ -35,6 +36,9 @@ export class AdminUsersService {
   ) {}
 
   async createAccount(dto: CreateUserAccountDto, actor: AuthenticatedUser): Promise<SafeAccount> {
+    // HR/Admin onboards regular staff; only a Super Admin can mint admin-level
+    // accounts (otherwise an admin could escalate their own privileges).
+    this.assertCanTouchRole(actor, dto.role);
     await this.employeesService.ensureExists(dto.employeeId);
     const passwordHash = await this.passwords.hash(dto.password);
 
@@ -46,12 +50,14 @@ export class AdminUsersService {
           employeeId: dto.employeeId,
           role: dto.role,
           passwordHash,
+          // HR-issued temporary password — force a change on first login.
+          mustChangePassword: true,
           createdBy: actor.id,
           updatedBy: actor.id,
         })
         .returning();
     } catch (err) {
-      if (typeof err === 'object' && err !== null && 'code' in err && err.code === '23505') {
+      if (pgErrorCode(err) === '23505') {
         throw new AppError(ErrorCode.CONFLICT, 'This employee already has an account', HttpStatus.CONFLICT);
       }
       throw err;
@@ -128,9 +134,12 @@ export class AdminUsersService {
     dto: ResetPasswordDto,
     actor: AuthenticatedUser,
   ): Promise<{ success: true }> {
-    await this.getOrThrow(accountId);
+    const target = await this.getOrThrow(accountId);
+    // An admin must not be able to take over admin/super-admin accounts.
+    this.assertCanTouchRole(actor, target.role);
     const passwordHash = await this.passwords.hash(dto.newPassword);
-    await this.applyChange(accountId, { passwordHash }, actor);
+    // Reset issues a temporary password, so force a change on next login.
+    await this.applyChange(accountId, { passwordHash, mustChangePassword: true }, actor);
     await this.sessions.revokeAllForUser(accountId);
     await this.audit.record({
       actorType: actor.type,
@@ -143,9 +152,21 @@ export class AdminUsersService {
 
   // ── internals ──
 
+  /** Non-super-admins may only manage employee/manager accounts. */
+  private assertCanTouchRole(actor: AuthenticatedUser, role: Role): void {
+    if (isSuperAdmin(actor)) return;
+    if (role === Role.ADMIN || role === Role.SUPER_ADMIN) {
+      throw new AppError(
+        ErrorCode.FORBIDDEN,
+        'Only a Super Admin can manage admin-level accounts',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+  }
+
   private async applyChange(
     accountId: string,
-    patch: Partial<Pick<UserAccount, 'role' | 'status' | 'passwordHash'>>,
+    patch: Partial<Pick<UserAccount, 'role' | 'status' | 'passwordHash' | 'mustChangePassword'>>,
     actor: AuthenticatedUser,
   ): Promise<UserAccount> {
     const [row] = await this.db

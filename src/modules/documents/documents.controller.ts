@@ -8,13 +8,9 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
-import { Role } from '../auth/roles';
 import { DocumentsService } from './documents.service';
-
-const ADMIN_ROLES = [Role.ADMIN, Role.SUPER_ADMIN] as const;
 
 /** Document-scoped operations (PRD §4.1). */
 @ApiTags('documents')
@@ -33,9 +29,8 @@ export class DocumentsController {
     return this.documents.getDownloadUrl(id, actor);
   }
 
-  /** Soft-delete (HR/Admin). The S3 object is retained for compliance. */
+  /** Soft-delete. HR/Admin for any document; employees for their own uploads. The S3 object is retained. */
   @Delete(':id')
-  @Roles([...ADMIN_ROLES])
   remove(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser() actor: AuthenticatedUser,

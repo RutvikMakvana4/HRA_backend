@@ -20,11 +20,18 @@ export const createLeaveTypeSchema = z.object({
   code: z.string().trim().min(1).max(20),
   isPaid: z.boolean().default(true),
   appliesToLocation: z.enum(leaveLocation.enumValues).default('all'),
-  accrualPolicy: accrualPolicySchema.optional(),
+  /** Null means "no accrual rules" (e.g. comp-off). */
+  accrualPolicy: accrualPolicySchema.nullable().optional(),
   requiresApproval: z.boolean().default(true),
   allowHalfDay: z.boolean().default(true),
   maxConsecutiveDays: z.number().int().positive().nullable().optional(),
 });
+
+/** Partial update; `code` is immutable (it is the type's stable identifier). */
+export const updateLeaveTypeSchema = createLeaveTypeSchema
+  .omit({ code: true })
+  .partial()
+  .strict();
 
 // ── Leave requests ───────────────────────────────────────────────────────────
 
@@ -53,6 +60,27 @@ export const decideLeaveSchema = z.object({
   note: z.string().trim().max(500).optional(),
 });
 
+// ── Leave balances ───────────────────────────────────────────────────────────
+
+/**
+ * Manual balance set (HR/Admin) — the stop-gap until accrual automation lands.
+ * SETS the employee's accrued days for the year (absolute, not incremental),
+ * so the call is idempotent and doubles as the edit: set again to correct it.
+ * `used`/`pending` are never touched here.
+ */
+export const setLeaveBalanceSchema = z.object({
+  employeeId: z.uuid(),
+  leaveTypeId: z.uuid(),
+  days: z.number().nonnegative().max(365),
+  year: z.number().int().min(2000).max(2100).optional(),
+});
+
+/** One-click new-joiner grant: every accruing type's entitlement for the year. */
+export const grantPerPolicySchema = z.object({
+  employeeId: z.uuid(),
+  year: z.number().int().min(2000).max(2100).optional(),
+});
+
 // ── Holidays ─────────────────────────────────────────────────────────────────
 
 export const createHolidaySchema = z.object({
@@ -68,6 +96,9 @@ export const listHolidaysSchema = z.object({
 });
 
 export class CreateLeaveTypeDto extends createZodDto(createLeaveTypeSchema) {}
+export class UpdateLeaveTypeDto extends createZodDto(updateLeaveTypeSchema) {}
+export class SetLeaveBalanceDto extends createZodDto(setLeaveBalanceSchema) {}
+export class GrantPerPolicyDto extends createZodDto(grantPerPolicySchema) {}
 export class ApplyLeaveDto extends createZodDto(applyLeaveSchema) {}
 export class ListLeaveRequestsDto extends createZodDto(listLeaveRequestsSchema) {}
 export class DecideLeaveDto extends createZodDto(decideLeaveSchema) {}

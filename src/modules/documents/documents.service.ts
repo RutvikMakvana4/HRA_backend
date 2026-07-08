@@ -32,6 +32,17 @@ export class DocumentsService {
     dto: CreateDocumentDto,
     actor: AuthenticatedUser,
   ): Promise<CreatedDocument> {
+    const isHr = isAdminOrAbove(actor);
+    if (!isHr && employeeId !== actor.id) {
+      throw new AppError(
+        ErrorCode.FORBIDDEN,
+        'You can only upload documents to your own profile',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+    // Employees may only create documents visible to themselves; never hr_only.
+    const visibility = isHr ? dto.visibility : 'employee_visible';
+
     await this.employeesService.ensureExists(employeeId);
     const fileKey = this.storage.buildDocumentKey(employeeId, dto.filename);
 
@@ -44,7 +55,7 @@ export class DocumentsService {
         fileKey,
         mimeType: dto.mimeType,
         sizeBytes: dto.sizeBytes,
-        visibility: dto.visibility,
+        visibility,
         uploadedBy: actor.id,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : null,
       })
@@ -103,6 +114,13 @@ export class DocumentsService {
   /** Soft-delete a document (HR/Admin). The S3 object is retained (compliance retention). */
   async softDelete(documentId: string, actor: AuthenticatedUser): Promise<{ id: string }> {
     const doc = await this.getActiveOrThrow(documentId);
+    if (!isAdminOrAbove(actor) && doc.uploadedBy !== actor.id) {
+      throw new AppError(
+        ErrorCode.FORBIDDEN,
+        'You can only delete documents you uploaded',
+        HttpStatus.FORBIDDEN,
+      );
+    }
     await this.db
       .update(documents)
       .set({ deletedAt: new Date() })

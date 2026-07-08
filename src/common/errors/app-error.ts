@@ -44,3 +44,20 @@ export class NotImplementedError extends AppError {
     super(ErrorCode.NOT_IMPLEMENTED, `${what} is not implemented yet`, HttpStatus.NOT_IMPLEMENTED);
   }
 }
+
+/**
+ * Extract the Postgres error code (e.g. 23505 unique_violation) from a thrown
+ * error. Drizzle wraps the pg error in `cause`, so walk the chain instead of
+ * only checking the top-level `code` property.
+ */
+export function pgErrorCode(err: unknown): string | undefined {
+  let current: unknown = err;
+  for (let depth = 0; depth < 5 && typeof current === 'object' && current !== null; depth++) {
+    if ('code' in current) {
+      const code: unknown = (current as { code: unknown }).code;
+      if (typeof code === 'string' && /^\d{5}$/.test(code)) return code;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}

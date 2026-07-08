@@ -9,14 +9,10 @@ import {
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, type AuthenticatedUser } from '../../common/decorators/current-user.decorator';
-import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { RolesGuard } from '../auth/roles.guard';
-import { Role } from '../auth/roles';
 import { DocumentsService } from './documents.service';
 import { CreateDocumentDto } from './dto/document.dto';
-
-const ADMIN_ROLES = [Role.ADMIN, Role.SUPER_ADMIN] as const;
 
 /** Documents nested under an employee (PRD §4.1). */
 @ApiTags('documents')
@@ -26,9 +22,8 @@ const ADMIN_ROLES = [Role.ADMIN, Role.SUPER_ADMIN] as const;
 export class EmployeeDocumentsController {
   constructor(private readonly documents: DocumentsService) {}
 
-  /** Register a document + get a signed upload URL (HR/Admin). */
+  /** Register a document + get a signed upload URL. HR/Admin for anyone; employees for themselves. */
   @Post()
-  @Roles([...ADMIN_ROLES])
   create(
     @Param('employeeId', ParseUUIDPipe) employeeId: string,
     @Body() dto: CreateDocumentDto,

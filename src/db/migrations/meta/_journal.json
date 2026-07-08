@@ -40,22 +40,15 @@
     {
       "idx": 5,
       "version": "7",
-      "when": 1783143497515,
-      "tag": "0005_open_gabe_jones",
+      "when": 1783321783900,
+      "tag": "0005_zippy_lethal_legion",
       "breakpoints": true
     },
     {
       "idx": 6,
       "version": "7",
-      "when": 1783338537434,
-      "tag": "0006_odd_strong_guy",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "7",
-      "when": 1783402387912,
-      "tag": "0007_steep_vengeance",
+      "when": 1783410186608,
+      "tag": "0006_daily_next_avengers",
       "breakpoints": true
     }
   ]

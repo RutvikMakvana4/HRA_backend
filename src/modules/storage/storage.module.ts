@@ -25,6 +25,10 @@ import { StorageService } from './storage.service';
             accessKeyId: config.get('AWS_ACCESS_KEY_ID'),
             secretAccessKey: config.get('AWS_SECRET_ACCESS_KEY'),
           },
+          // Only add integrity checksums when an operation requires them. The SDK's
+          // newer default (WHEN_SUPPORTED) injects a CRC32 into presigned PUT URLs,
+          // which a browser upload can't reproduce — S3/LocalStack then rejects it (400).
+          requestChecksumCalculation: 'WHEN_REQUIRED',
           ...(endpoint ? { endpoint, forcePathStyle: true } : {}),
         });
       },

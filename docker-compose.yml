@@ -1,4 +1,4 @@
-# Local development dependencies: Postgres + Redis + LocalStack (SQS).
+# Local development dependencies: Postgres + Redis + LocalStack (SQS + S3).
 # Bring up:  pnpm up        Tear down:  pnpm down
 services:
   postgres:
@@ -39,12 +39,13 @@ services:
     container_name: hra-localstack
     restart: unless-stopped
     environment:
-      SERVICES: sqs
+      SERVICES: sqs,s3
       DEFAULT_REGION: us-east-1
     ports:
       - '4566:4566'
     volumes:
       - hra-localstack:/var/lib/localstack
+      - ./localstack/init/ready.d:/etc/localstack/init/ready.d
     healthcheck:
       test: ['CMD-SHELL', 'curl -sf http://localhost:4566/_localstack/health || exit 1']
       interval: 10s
