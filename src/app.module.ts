@@ -21,6 +21,8 @@ import { AttendanceModule } from './modules/attendance/attendance.module';
 import { OnboardingModule } from './modules/onboarding/onboarding.module';
 import { TimesheetsModule } from './modules/timesheets/timesheets.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
+import { PerformanceModule } from './modules/performance/performance.module';
+import { RecruitmentModule } from './modules/recruitment/recruitment.module';
 import { EssModule } from './modules/ess/ess.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { BodyCaseMiddleware } from './common/middleware/body-case.middleware';
@@ -89,6 +91,12 @@ import { ResponseCaseInterceptor } from './common/interceptors/response-case.int
 
     // Module 6 — Expenses & Reimbursement
     ExpensesModule,
+
+    // Module 8 — Performance & Reviews
+    PerformanceModule,
+
+    // Module 9 — Recruitment / ATS (closes the loop into Module 5 onboarding)
+    RecruitmentModule,
   ],
   providers: [
     // HTTP-only global enhancers (kept out of CommonModule so the worker doesn't load them):

@@ -16,12 +16,25 @@ import {
   expenseCategories,
   expenseClaims,
   expenseLineItems,
+  feedback,
+  goals,
   lifecycleCases,
+  oneOnOnes,
   projectAllocations,
   projects,
+  reviewCycles,
+  reviewTemplates,
+  reviews,
   timesheetEntries,
   timesheetWeeks,
   userAccounts,
+  applications,
+  candidates,
+  interviewScorecards,
+  interviews,
+  jobOpenings,
+  offers,
+  pipelineStages,
 } from './schema';
 
 export const departmentsRelations = relations(departments, ({ one, many }) => ({
@@ -190,6 +203,162 @@ export const expenseLineItemsRelations = relations(expenseLineItems, ({ one }) =
   }),
   receipt: one(documents, {
     fields: [expenseLineItems.receiptDocumentId],
+    references: [documents.id],
+  }),
+}));
+
+// ── Module 8: Performance & Reviews ──────────────────────────────────────────
+
+export const reviewCyclesRelations = relations(reviewCycles, ({ one, many }) => ({
+  template: one(reviewTemplates, {
+    fields: [reviewCycles.templateId],
+    references: [reviewTemplates.id],
+  }),
+  reviews: many(reviews),
+  goals: many(goals),
+}));
+
+export const goalsRelations = relations(goals, ({ one, many }) => ({
+  employee: one(employees, { fields: [goals.employeeId], references: [employees.id] }),
+  cycle: one(reviewCycles, { fields: [goals.cycleId], references: [reviewCycles.id] }),
+  parent: one(goals, {
+    fields: [goals.parentGoalId],
+    references: [goals.id],
+    relationName: 'goal_parent',
+  }),
+  children: many(goals, { relationName: 'goal_parent' }),
+}));
+
+export const reviewTemplatesRelations = relations(reviewTemplates, ({ many }) => ({
+  reviews: many(reviews),
+  cycles: many(reviewCycles),
+}));
+
+export const reviewsRelations = relations(reviews, ({ one }) => ({
+  cycle: one(reviewCycles, { fields: [reviews.cycleId], references: [reviewCycles.id] }),
+  subject: one(employees, {
+    fields: [reviews.subjectEmployeeId],
+    references: [employees.id],
+    relationName: 'review_subject',
+  }),
+  reviewer: one(employees, {
+    fields: [reviews.reviewerId],
+    references: [employees.id],
+    relationName: 'review_reviewer',
+  }),
+  template: one(reviewTemplates, {
+    fields: [reviews.templateId],
+    references: [reviewTemplates.id],
+  }),
+}));
+
+export const oneOnOnesRelations = relations(oneOnOnes, ({ one }) => ({
+  manager: one(employees, {
+    fields: [oneOnOnes.managerId],
+    references: [employees.id],
+    relationName: 'one_on_one_manager',
+  }),
+  employee: one(employees, {
+    fields: [oneOnOnes.employeeId],
+    references: [employees.id],
+    relationName: 'one_on_one_employee',
+  }),
+}));
+
+export const feedbackRelations = relations(feedback, ({ one }) => ({
+  from: one(employees, {
+    fields: [feedback.fromEmployeeId],
+    references: [employees.id],
+    relationName: 'feedback_from',
+  }),
+  to: one(employees, {
+    fields: [feedback.toEmployeeId],
+    references: [employees.id],
+    relationName: 'feedback_to',
+  }),
+}));
+
+// ── Module 9: Recruitment / ATS ──────────────────────────────────────────────
+
+export const pipelineStagesRelations = relations(pipelineStages, ({ many }) => ({
+  applications: many(applications),
+}));
+
+export const jobOpeningsRelations = relations(jobOpenings, ({ one, many }) => ({
+  department: one(departments, {
+    fields: [jobOpenings.departmentId],
+    references: [departments.id],
+  }),
+  hiringManager: one(employees, {
+    fields: [jobOpenings.hiringManagerId],
+    references: [employees.id],
+  }),
+  applications: many(applications),
+}));
+
+export const candidatesRelations = relations(candidates, ({ one, many }) => ({
+  resume: one(documents, {
+    fields: [candidates.resumeDocumentId],
+    references: [documents.id],
+  }),
+  referredBy: one(employees, {
+    fields: [candidates.referredByEmployeeId],
+    references: [employees.id],
+  }),
+  applications: many(applications),
+}));
+
+export const applicationsRelations = relations(applications, ({ one, many }) => ({
+  candidate: one(candidates, {
+    fields: [applications.candidateId],
+    references: [candidates.id],
+  }),
+  jobOpening: one(jobOpenings, {
+    fields: [applications.jobOpeningId],
+    references: [jobOpenings.id],
+  }),
+  currentStage: one(pipelineStages, {
+    fields: [applications.currentStageId],
+    references: [pipelineStages.id],
+  }),
+  hiredEmployee: one(employees, {
+    fields: [applications.hiredEmployeeId],
+    references: [employees.id],
+  }),
+  interviews: many(interviews),
+  offer: one(offers),
+}));
+
+export const interviewsRelations = relations(interviews, ({ one, many }) => ({
+  application: one(applications, {
+    fields: [interviews.applicationId],
+    references: [applications.id],
+  }),
+  interviewer: one(employees, {
+    fields: [interviews.interviewerId],
+    references: [employees.id],
+  }),
+  scorecards: many(interviewScorecards),
+}));
+
+export const interviewScorecardsRelations = relations(interviewScorecards, ({ one }) => ({
+  interview: one(interviews, {
+    fields: [interviewScorecards.interviewId],
+    references: [interviews.id],
+  }),
+  interviewer: one(employees, {
+    fields: [interviewScorecards.interviewerId],
+    references: [employees.id],
+  }),
+}));
+
+export const offersRelations = relations(offers, ({ one }) => ({
+  application: one(applications, {
+    fields: [offers.applicationId],
+    references: [applications.id],
+  }),
+  offerDocument: one(documents, {
+    fields: [offers.offerDocumentId],
     references: [documents.id],
   }),
 }));
