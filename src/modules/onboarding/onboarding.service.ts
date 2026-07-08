@@ -389,6 +389,7 @@ export class OnboardingService {
     }
     if (query.status) filters.push(eq(checklistTasks.status, query.status));
     if (query.caseId) filters.push(eq(checklistTasks.caseId, query.caseId));
+    filters.push(inArray(lifecycleCases.status, ['not_started', 'in_progress']));
 
     return this.db
       .select({
