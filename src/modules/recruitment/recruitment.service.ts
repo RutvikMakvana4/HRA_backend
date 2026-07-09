@@ -1,10 +1,11 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, ilike, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
 import type { Database } from '../../db/client';
 import {
   applications,
   candidates,
+  departments,
   documents,
   employees,
   interviewScorecards,
@@ -116,6 +117,7 @@ export class RecruitmentService {
         id: jobOpenings.id,
         title: jobOpenings.title,
         departmentId: jobOpenings.departmentId,
+        departmentName: departments.name,
         employmentType: jobOpenings.employmentType,
         hiringManagerId: jobOpenings.hiringManagerId,
         hiringManagerName: this.nameExpr(),
@@ -125,17 +127,27 @@ export class RecruitmentService {
         openedAt: jobOpenings.openedAt,
         closedAt: jobOpenings.closedAt,
         createdAt: jobOpenings.createdAt,
+        activeCount: sql<number>`cast((select count(*) from applications a where a.job_opening_id = ${jobOpenings.id} and a.status = 'active') as int)`,
+        hiredCount: sql<number>`cast((select count(*) from applications a where a.job_opening_id = ${jobOpenings.id} and a.status = 'hired') as int)`,
       })
       .from(jobOpenings)
       .leftJoin(employees, eq(employees.id, jobOpenings.hiringManagerId))
+      .leftJoin(departments, eq(departments.id, jobOpenings.departmentId))
       .where(filters.length ? and(...filters) : undefined)
       .orderBy(desc(jobOpenings.openedAt));
   }
 
   async getJobOpening(id: string) {
     const opening = await this.getJobOpeningRow(id);
-    const hires = await this.countHires(id);
-    return { ...opening, hiredCount: hires };
+    const [dept] = opening.departmentId
+      ? await this.db.select({ name: departments.name }).from(departments).where(eq(departments.id, opening.departmentId)).limit(1)
+      : [];
+    const hiredCount = await this.countHires(id);
+    const [active] = await this.db
+      .select({ count: sql<number>`cast(count(*) as int)` })
+      .from(applications)
+      .where(and(eq(applications.jobOpeningId, id), eq(applications.status, 'active')));
+    return { ...opening, departmentName: dept?.name ?? null, activeCount: active?.count ?? 0, hiredCount };
   }
 
   async createJobOpening(dto: CreateJobOpeningDto, actor: AuthenticatedUser) {
@@ -196,7 +208,7 @@ export class RecruitmentService {
 
   // ── Candidates ───────────────────────────────────────────────────────────────
 
-  listCandidates(query: ListCandidatesDto): Promise<Candidate[]> {
+  listCandidates(query: ListCandidatesDto) {
     const filters: SQL[] = [];
     if (query.q) {
       const term = `%${query.q}%`;
@@ -204,14 +216,63 @@ export class RecruitmentService {
       if (match) filters.push(match);
     }
     return this.db
-      .select()
+      .select({
+        id: candidates.id,
+        fullName: candidates.fullName,
+        email: candidates.email,
+        phone: candidates.phone,
+        resumeDocumentId: candidates.resumeDocumentId,
+        source: candidates.source,
+        referredByEmployeeId: candidates.referredByEmployeeId,
+        referredByName: sql<string | null>`(select coalesce(e.display_name, e.first_name || ' ' || e.last_name) from employees e where e.id = ${candidates.referredByEmployeeId})`,
+        notes: candidates.notes,
+        createdAt: candidates.createdAt,
+      })
       .from(candidates)
       .where(filters.length ? and(...filters) : undefined)
       .orderBy(desc(candidates.createdAt));
   }
 
-  getCandidate(id: string): Promise<Candidate> {
-    return this.getCandidateRow(id);
+  async getCandidate(id: string) {
+    const candidate = await this.getCandidateRow(id);
+    const [ref] = candidate.referredByEmployeeId
+      ? await this.db.select({ name: this.nameExpr() }).from(employees).where(eq(employees.id, candidate.referredByEmployeeId)).limit(1)
+      : [];
+    const apps = await this.listApplications({ candidateId: id } as ListApplicationsDto);
+    const appIds = apps.map((a) => a.id);
+    // getCandidate has no actor (controller passes none) — the bundle shows every round for this
+    // candidate's applications, so query interviews directly rather than via listInterviews.
+    const rounds = appIds.length
+      ? await this.db
+          .select({
+            id: interviews.id,
+            applicationId: interviews.applicationId,
+            round: interviews.round,
+            type: interviews.type,
+            interviewerId: interviews.interviewerId,
+            interviewerName: this.nameExpr(),
+            scheduledAt: interviews.scheduledAt,
+            mode: interviews.mode,
+            status: interviews.status,
+          })
+          .from(interviews)
+          .leftJoin(employees, eq(employees.id, interviews.interviewerId))
+          .where(inArray(interviews.applicationId, appIds))
+          .orderBy(asc(interviews.round))
+      : [];
+    const cards = rounds.length
+      ? await Promise.all(rounds.map((iv) => this.listScorecards(iv.id))).then((x) => x.flat())
+      : [];
+    const offerRows = appIds.length
+      ? await this.db.select().from(offers).where(inArray(offers.applicationId, appIds))
+      : [];
+    return {
+      candidate: { ...candidate, referredByName: ref?.name ?? null },
+      applications: apps,
+      interviews: rounds,
+      scorecards: cards,
+      offers: offerRows,
+    };
   }
 
   /**
@@ -566,6 +627,7 @@ export class RecruitmentService {
         round: interviews.round,
         type: interviews.type,
         interviewerId: interviews.interviewerId,
+        interviewerName: this.nameExpr(),
         scheduledAt: interviews.scheduledAt,
         mode: interviews.mode,
         status: interviews.status,
@@ -574,6 +636,7 @@ export class RecruitmentService {
       .innerJoin(applications, eq(applications.id, interviews.applicationId))
       .innerJoin(candidates, eq(candidates.id, applications.candidateId))
       .innerJoin(jobOpenings, eq(jobOpenings.id, applications.jobOpeningId))
+      .leftJoin(employees, eq(employees.id, interviews.interviewerId))
       .where(filters.length ? and(...filters) : undefined)
       .orderBy(desc(interviews.scheduledAt));
   }
