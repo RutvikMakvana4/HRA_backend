@@ -96,7 +96,7 @@ export class DocumentsService {
     const doc = await this.getActiveOrThrow(documentId);
     const hr = isAdminOrAbove(actor);
     if (!hr) {
-      if (doc.visibility !== 'employee_visible') {
+      if (doc.visibility !== 'employee_visible' || !doc.employeeId) {
         throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to access this document', HttpStatus.FORBIDDEN);
       }
       await this.assertCanAccessEmployeeDocs(doc.employeeId, actor);
