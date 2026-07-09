@@ -88,6 +88,8 @@ export const listCandidatesSchema = z.object({
   q: z.string().trim().min(1).max(200).optional(),
 });
 
+export const setResumeSchema = z.object({ documentId: z.uuid() });
+
 // ── Applications ─────────────────────────────────────────────────────────────
 
 export const createApplicationSchema = z.object({
@@ -198,6 +200,7 @@ export class ListJobOpeningsDto extends createZodDto(listJobOpeningsSchema) {}
 export class CreateCandidateDto extends createZodDto(createCandidateSchema) {}
 export class UpdateCandidateDto extends createZodDto(updateCandidateSchema) {}
 export class ListCandidatesDto extends createZodDto(listCandidatesSchema) {}
+export class SetResumeDto extends createZodDto(setResumeSchema) {}
 export class CreateApplicationDto extends createZodDto(createApplicationSchema) {}
 export class MoveApplicationDto extends createZodDto(moveApplicationSchema) {}
 export class RejectApplicationDto extends createZodDto(rejectApplicationSchema) {}

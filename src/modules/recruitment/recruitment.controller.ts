@@ -32,6 +32,7 @@ import {
   ListJobOpeningsDto,
   MoveApplicationDto,
   RejectApplicationDto,
+  SetResumeDto,
   SubmitScorecardDto,
   UpdateCandidateDto,
   UpdateInterviewDto,
@@ -143,6 +144,16 @@ export class CandidatesController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.recruitment.updateCandidate(id, dto, actor);
+  }
+
+  // No @Roles: the service enforces referrer-or-recruiter (a referral's own referrer may attach it).
+  @Patch(':id/resume')
+  setResume(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetResumeDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.recruitment.setCandidateResume(id, dto.documentId, actor);
   }
 }
 

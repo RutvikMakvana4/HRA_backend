@@ -238,6 +238,9 @@ export class RecruitmentService {
     const [ref] = candidate.referredByEmployeeId
       ? await this.db.select({ name: this.nameExpr() }).from(employees).where(eq(employees.id, candidate.referredByEmployeeId)).limit(1)
       : [];
+    const [resume] = candidate.resumeDocumentId
+      ? await this.db.select({ title: documents.title }).from(documents).where(eq(documents.id, candidate.resumeDocumentId)).limit(1)
+      : [];
     const apps = await this.listApplications({ candidateId: id } as ListApplicationsDto);
     const appIds = apps.map((a) => a.id);
     // getCandidate has no actor (controller passes none) — the bundle shows every round for this
@@ -267,12 +270,40 @@ export class RecruitmentService {
       ? await this.db.select().from(offers).where(inArray(offers.applicationId, appIds))
       : [];
     return {
-      candidate: { ...candidate, referredByName: ref?.name ?? null },
+      candidate: { ...candidate, referredByName: ref?.name ?? null, resumeName: resume?.title ?? null },
       applications: apps,
       interviews: rounds,
       scorecards: cards,
       offers: offerRows,
     };
+  }
+
+  /** Point a candidate at an uploaded resume document. Recruiter/admin or the referrer. */
+  async setCandidateResume(candidateId: string, documentId: string, actor: AuthenticatedUser) {
+    const candidate = await this.getCandidateRow(candidateId);
+    if (!isAdminOrAbove(actor) && candidate.referredByEmployeeId !== actor.id) {
+      throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to set this resume', HttpStatus.FORBIDDEN);
+    }
+    const [doc] = await this.db
+      .select({ id: documents.id, candidateId: documents.candidateId })
+      .from(documents)
+      .where(eq(documents.id, documentId))
+      .limit(1);
+    if (!doc || doc.candidateId !== candidateId) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Document is not a resume for this candidate');
+    }
+    const previous = candidate.resumeDocumentId;
+    await this.db
+      .update(candidates)
+      .set({ resumeDocumentId: documentId, updatedAt: new Date() })
+      .where(eq(candidates.id, candidateId));
+    if (previous && previous !== documentId) {
+      await this.db.update(documents).set({ deletedAt: new Date() }).where(eq(documents.id, previous));
+    }
+    await this.record(actor, 'candidate.resume', `candidate:${candidateId}`, {
+      after: { resumeDocumentId: documentId },
+    });
+    return { id: candidateId, resumeDocumentId: documentId };
   }
 
   /**
