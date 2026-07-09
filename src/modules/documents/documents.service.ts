@@ -6,7 +6,7 @@ import { DRIZZLE } from '../../common/constants';
 import { AppError, ErrorCode } from '../../common/errors/app-error';
 import { AUDIT_SERVICE, type AuditService } from '../../common/audit/audit.interface';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
-import { isAdminOrAbove } from '../auth/roles';
+import { isAdminOrAbove, isManagerOrAbove } from '../auth/roles';
 import { EmployeesService } from '../employees/employees.service';
 import { StorageService } from '../storage/storage.service';
 import type { CreateDocumentDto } from './dto/document.dto';
@@ -86,7 +86,7 @@ export class DocumentsService {
       .where(eq(candidates.id, candidateId))
       .limit(1);
     if (!candidate) throw new AppError(ErrorCode.NOT_FOUND, 'Candidate not found', HttpStatus.NOT_FOUND);
-    if (!isAdminOrAbove(actor) && candidate.referredBy !== actor.id) {
+    if (!isManagerOrAbove(actor) && candidate.referredBy !== actor.id) {
       throw new AppError(
         ErrorCode.FORBIDDEN,
         'Only recruiters or the referring employee can upload this resume',
@@ -143,7 +143,7 @@ export class DocumentsService {
     const doc = await this.getActiveOrThrow(documentId);
 
     if (doc.candidateId) {
-      const hr = isAdminOrAbove(actor);
+      const hr = isManagerOrAbove(actor);
       if (!hr) {
         const [cand] = await this.db
           .select({ referredBy: candidates.referredByEmployeeId })

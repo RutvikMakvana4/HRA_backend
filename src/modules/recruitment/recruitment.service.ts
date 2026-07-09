@@ -1,6 +1,6 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, ilike, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import type { Database } from '../../db/client';
 import {
   applications,
@@ -25,7 +25,7 @@ import { DRIZZLE } from '../../common/constants';
 import { AppError, ErrorCode } from '../../common/errors/app-error';
 import { AUDIT_SERVICE, type AuditService } from '../../common/audit/audit.interface';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
-import { isAdminOrAbove } from '../auth/roles';
+import { isAdminOrAbove, isManagerOrAbove } from '../auth/roles';
 import { EmployeesService } from '../employees/employees.service';
 import { OnboardingService } from '../onboarding/onboarding.service';
 import type {
@@ -281,13 +281,13 @@ export class RecruitmentService {
   /** Point a candidate at an uploaded resume document. Recruiter/admin or the referrer. */
   async setCandidateResume(candidateId: string, documentId: string, actor: AuthenticatedUser) {
     const candidate = await this.getCandidateRow(candidateId);
-    if (!isAdminOrAbove(actor) && candidate.referredByEmployeeId !== actor.id) {
+    if (!isManagerOrAbove(actor) && candidate.referredByEmployeeId !== actor.id) {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to set this resume', HttpStatus.FORBIDDEN);
     }
     const [doc] = await this.db
       .select({ id: documents.id, candidateId: documents.candidateId })
       .from(documents)
-      .where(eq(documents.id, documentId))
+      .where(and(eq(documents.id, documentId), isNull(documents.deletedAt)))
       .limit(1);
     if (!doc || doc.candidateId !== candidateId) {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'Document is not a resume for this candidate');
