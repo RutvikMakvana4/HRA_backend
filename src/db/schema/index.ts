@@ -6,6 +6,8 @@ export * from './attendance';
 export * from './onboarding';
 export * from './projects';
 export * from './expenses';
+export * from './performance';
+export * from './recruitment';
 export * from './notifications';
 export * from './enums';
 export * from './_conventions';
