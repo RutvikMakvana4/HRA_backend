@@ -24,7 +24,7 @@ import {
 } from './enums';
 
 /** One competency line inside a review template's `competencies` list. */
-export type Competency = { label: string; description?: string; ratingScale: number };
+export type Competency = { id?: string; label: string; description?: string; ratingScale: number };
 /** One action item on a 1:1 (`actionItems` list). */
 export type ActionItem = { text: string; ownerId?: string; done: boolean };
 

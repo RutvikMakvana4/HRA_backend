@@ -1,6 +1,6 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, or, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { Database } from '../../db/client';
 import {
@@ -407,6 +407,10 @@ export class PerformanceService {
     const filters: SQL[] = [];
     if (query.scope === 'me') {
       filters.push(eq(reviews.subjectEmployeeId, actor.id));
+      // Self reviews are always visible to the subject; manager/peer reviews about them only once
+      // their cycle has closed (mirrors `assertCanViewReview`'s per-review gate).
+      const visibleType = or(eq(reviews.type, 'self'), eq(reviewCycles.status, 'closed'));
+      if (visibleType) filters.push(visibleType);
     } else if (query.scope === 'to-complete') {
       filters.push(eq(reviews.reviewerId, actor.id));
     } else {
