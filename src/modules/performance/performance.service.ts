@@ -1,6 +1,7 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { Database } from '../../db/client';
 import {
   employees,
@@ -53,8 +54,28 @@ export class PerformanceService {
 
   // ── Review cycles (HR) ───────────────────────────────────────────────────────
 
-  listCycles(): Promise<ReviewCycle[]> {
-    return this.db.select().from(reviewCycles).orderBy(desc(reviewCycles.startDate));
+  listCycles() {
+    return this.db
+      .select({
+        id: reviewCycles.id,
+        name: reviewCycles.name,
+        type: reviewCycles.type,
+        startDate: reviewCycles.startDate,
+        endDate: reviewCycles.endDate,
+        status: reviewCycles.status,
+        templateId: reviewCycles.templateId,
+        includesSelfReview: reviewCycles.includesSelfReview,
+        includesPeerReview: reviewCycles.includesPeerReview,
+        includesManagerReview: reviewCycles.includesManagerReview,
+        activatedAt: reviewCycles.activatedAt,
+        closedAt: reviewCycles.closedAt,
+        createdAt: reviewCycles.createdAt,
+        updatedAt: reviewCycles.updatedAt,
+        reviewCount: sql<number>`cast((select count(*) from reviews r where r.cycle_id = ${reviewCycles.id}) as int)`,
+        submittedCount: sql<number>`cast((select count(*) from reviews r where r.cycle_id = ${reviewCycles.id} and r.status = 'submitted') as int)`,
+      })
+      .from(reviewCycles)
+      .orderBy(desc(reviewCycles.startDate));
   }
 
   async createCycle(dto: CreateCycleDto, actor: AuthenticatedUser) {
@@ -396,6 +417,8 @@ export class PerformanceService {
     }
     if (query.cycleId) filters.push(eq(reviews.cycleId, query.cycleId));
 
+    const reviewer = alias(employees, 'reviewer');
+
     return this.db
       .select({
         id: reviews.id,
@@ -405,6 +428,7 @@ export class PerformanceService {
         subjectEmployeeId: reviews.subjectEmployeeId,
         subjectName: this.nameExpr(),
         reviewerId: reviews.reviewerId,
+        reviewerName: sql<string | null>`coalesce(${reviewer.displayName}, ${reviewer.firstName} || ' ' || ${reviewer.lastName})`,
         type: reviews.type,
         templateId: reviews.templateId,
         overallRating: reviews.overallRating,
@@ -415,6 +439,7 @@ export class PerformanceService {
       .from(reviews)
       .innerJoin(reviewCycles, eq(reviewCycles.id, reviews.cycleId))
       .innerJoin(employees, eq(employees.id, reviews.subjectEmployeeId))
+      .leftJoin(reviewer, eq(reviewer.id, reviews.reviewerId))
       .where(filters.length ? and(...filters) : undefined)
       .orderBy(desc(reviews.createdAt));
   }
