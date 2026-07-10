@@ -417,10 +417,13 @@ export class PerformanceService {
       // is final (see `assertReviewEditable`) so it must not keep showing up as actionable.
       filters.push(eq(reviews.status, 'pending'));
     } else {
-      // team: reviews of the actor's direct reports (managers/HR)
-      const reportIds = await this.directReportIds(actor.id);
-      if (reportIds.length === 0 && !isAdminOrAbove(actor)) return [];
-      if (reportIds.length > 0) filters.push(inArray(reviews.subjectEmployeeId, reportIds));
+      // team: admins see every review org-wide (the page is admin-gated); everyone
+      // else sees only their direct reports'.
+      if (!isAdminOrAbove(actor)) {
+        const reportIds = await this.directReportIds(actor.id);
+        if (reportIds.length === 0) return [];
+        filters.push(inArray(reviews.subjectEmployeeId, reportIds));
+      }
     }
     if (query.cycleId) filters.push(eq(reviews.cycleId, query.cycleId));
 
