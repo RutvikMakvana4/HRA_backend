@@ -127,8 +127,8 @@ export class RecruitmentService {
         openedAt: jobOpenings.openedAt,
         closedAt: jobOpenings.closedAt,
         createdAt: jobOpenings.createdAt,
-        activeCount: sql<number>`cast((select count(*) from applications a where a.job_opening_id = ${jobOpenings.id} and a.status = 'active') as int)`,
-        hiredCount: sql<number>`cast((select count(*) from applications a where a.job_opening_id = ${jobOpenings.id} and a.status = 'hired') as int)`,
+        activeCount: sql<number>`cast((select count(*) from applications a where a.job_opening_id = "job_openings"."id" and a.status = 'active') as int)`,
+        hiredCount: sql<number>`cast((select count(*) from applications a where a.job_opening_id = "job_openings"."id" and a.status = 'hired') as int)`,
       })
       .from(jobOpenings)
       .leftJoin(employees, eq(employees.id, jobOpenings.hiringManagerId))

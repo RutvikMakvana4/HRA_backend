@@ -71,8 +71,8 @@ export class PerformanceService {
         closedAt: reviewCycles.closedAt,
         createdAt: reviewCycles.createdAt,
         updatedAt: reviewCycles.updatedAt,
-        reviewCount: sql<number>`cast((select count(*) from reviews r where r.cycle_id = ${reviewCycles.id}) as int)`,
-        submittedCount: sql<number>`cast((select count(*) from reviews r where r.cycle_id = ${reviewCycles.id} and r.status = 'submitted') as int)`,
+        reviewCount: sql<number>`cast((select count(*) from reviews r where r.cycle_id = "review_cycles"."id") as int)`,
+        submittedCount: sql<number>`cast((select count(*) from reviews r where r.cycle_id = "review_cycles"."id" and r.status = 'submitted') as int)`,
       })
       .from(reviewCycles)
       .orderBy(desc(reviewCycles.startDate));
