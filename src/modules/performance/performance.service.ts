@@ -413,6 +413,9 @@ export class PerformanceService {
       if (visibleType) filters.push(visibleType);
     } else if (query.scope === 'to-complete') {
       filters.push(eq(reviews.reviewerId, actor.id));
+      // "To complete" excludes reviews the reviewer has already submitted — a submitted review
+      // is final (see `assertReviewEditable`) so it must not keep showing up as actionable.
+      filters.push(eq(reviews.status, 'pending'));
     } else {
       // team: reviews of the actor's direct reports (managers/HR)
       const reportIds = await this.directReportIds(actor.id);
