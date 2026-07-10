@@ -76,6 +76,7 @@ export const updateGoalSchema = z
 export const listGoalsSchema = z.object({
   employeeId: z.uuid().optional(),
   cycleId: z.uuid().optional(),
+  scope: z.enum(['me', 'team']).optional(),
 });
 
 // ── Review templates ─────────────────────────────────────────────────────────

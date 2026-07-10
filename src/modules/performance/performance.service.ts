@@ -269,15 +269,28 @@ export class PerformanceService {
   // ── Goals ──────────────────────────────────────────────────────────────────────
 
   async listGoals(query: ListGoalsDto, actor: AuthenticatedUser): Promise<Goal[]> {
-    const targetEmployeeId = query.employeeId ?? actor.id;
-    await this.assertCanViewEmployee(actor, targetEmployeeId);
-    const filters: SQL[] = [eq(goals.employeeId, targetEmployeeId)];
+    const filters: SQL[] = [];
+
+    if (query.scope === 'team') {
+      // Mirrors listReviews' `team` branch: admins see every goal org-wide (the page is
+      // admin-gated); everyone else sees only their direct reports'. `employeeId` is ignored.
+      if (!isAdminOrAbove(actor)) {
+        const reportIds = await this.directReportIds(actor.id);
+        if (reportIds.length === 0) return [];
+        filters.push(inArray(goals.employeeId, reportIds));
+      }
+    } else {
+      const targetEmployeeId = query.employeeId ?? actor.id;
+      await this.assertCanViewEmployee(actor, targetEmployeeId);
+      filters.push(eq(goals.employeeId, targetEmployeeId));
+    }
+
     if (query.cycleId) filters.push(eq(goals.cycleId, query.cycleId));
-    return this.db
-      .select()
-      .from(goals)
-      .where(and(...filters))
-      .orderBy(asc(goals.createdAt));
+
+    const rows = this.db.select().from(goals);
+    return filters.length
+      ? rows.where(and(...filters)).orderBy(asc(goals.createdAt))
+      : rows.orderBy(asc(goals.createdAt));
   }
 
   async createGoal(dto: CreateGoalDto, actor: AuthenticatedUser) {
