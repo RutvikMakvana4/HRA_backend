@@ -1,4 +1,5 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { Database } from '../../db/client';
 import {
@@ -213,7 +214,7 @@ export class PerformanceService {
       .insert(reviewTemplates)
       .values({
         name: dto.name,
-        competencies: dto.competencies.map((c) => ({ ...c, ratingScale: c.ratingScale })),
+        competencies: dto.competencies.map((c) => ({ ...c, id: c.id ?? randomUUID() })),
         openQuestions: dto.openQuestions,
       })
       .returning();
@@ -228,8 +229,9 @@ export class PerformanceService {
     await this.getTemplateRow(id);
     const patch: Partial<typeof reviewTemplates.$inferInsert> = { updatedAt: new Date() };
     if (dto.name !== undefined) patch.name = dto.name;
-    if (dto.competencies !== undefined)
-      patch.competencies = dto.competencies.map((c) => ({ ...c, ratingScale: c.ratingScale }));
+    if (dto.competencies !== undefined) {
+      patch.competencies = dto.competencies.map((c) => ({ ...c, id: c.id ?? randomUUID() }));
+    }
     if (dto.openQuestions !== undefined) patch.openQuestions = dto.openQuestions;
     const [row] = await this.db
       .update(reviewTemplates)

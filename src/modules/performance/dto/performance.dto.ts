@@ -81,6 +81,7 @@ export const listGoalsSchema = z.object({
 // ── Review templates ─────────────────────────────────────────────────────────
 
 const competencySchema = z.object({
+  id: z.uuid().optional(),
   label: z.string().trim().min(1).max(150),
   description: z.string().trim().max(500).optional(),
   ratingScale: z.number().int().min(2).max(10).default(5),
