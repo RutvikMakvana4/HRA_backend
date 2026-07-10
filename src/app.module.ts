@@ -23,6 +23,8 @@ import { TimesheetsModule } from './modules/timesheets/timesheets.module';
 import { ExpensesModule } from './modules/expenses/expenses.module';
 import { PerformanceModule } from './modules/performance/performance.module';
 import { RecruitmentModule } from './modules/recruitment/recruitment.module';
+import { AssetsModule } from './modules/assets/assets.module';
+import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { EssModule } from './modules/ess/ess.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { BodyCaseMiddleware } from './common/middleware/body-case.middleware';
@@ -97,6 +99,12 @@ import { ResponseCaseInterceptor } from './common/interceptors/response-case.int
 
     // Module 9 — Recruitment / ATS (closes the loop into Module 5 onboarding)
     RecruitmentModule,
+
+    // Module 10 — Asset Management (wires into Module 5 on/offboarding checklists)
+    AssetsModule,
+
+    // Module 11 — Analytics & Reporting (read-only aggregation across every prior module)
+    AnalyticsModule,
   ],
   providers: [
     // HTTP-only global enhancers (kept out of CommonModule so the worker doesn't load them):

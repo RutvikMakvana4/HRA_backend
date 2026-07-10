@@ -50,6 +50,13 @@
       "when": 1783410186608,
       "tag": "0006_daily_next_avengers",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1783497412493,
+      "tag": "0007_worthless_vance_astro",
+      "breakpoints": true
     }
   ]
 }
