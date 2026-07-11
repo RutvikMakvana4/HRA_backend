@@ -44,6 +44,14 @@ import type {
   UpdateTemplateDto,
 } from './dto/performance.dto';
 
+/**
+ * An action item as returned over the wire: the stored `ActionItem` plus a derived `ownerName`.
+ * Deliberately kept out of `db/schema/performance.ts` — `ActionItem` there describes what's
+ * persisted in the `action_items` jsonb column, and `ownerName` must never be written to it.
+ * Only `withActionItemOwnerNames` produces this shape, at read time.
+ */
+type ActionItemWithOwnerName = ActionItem & { ownerName: string | null };
+
 @Injectable()
 export class PerformanceService {
   constructor(
@@ -591,7 +599,8 @@ export class PerformanceService {
       .where(and(...filters))
       .orderBy(desc(oneOnOnes.date));
     const redacted = await Promise.all(rows.map((r) => this.redactOneOnOne(r, actor)));
-    return Promise.all(redacted.map((r) => this.withParticipantNames(r)));
+    const named = await Promise.all(redacted.map((r) => this.withParticipantNames(r)));
+    return this.withActionItemOwnerNames(named);
   }
 
   async createOneOnOne(dto: CreateOneOnOneDto, actor: AuthenticatedUser) {
@@ -640,7 +649,9 @@ export class PerformanceService {
     await this.record(actor, 'one_on_one.create', `one_on_one:${row.id}`, {
       after: { managerId, employeeId, date: dto.date },
     });
-    return this.withParticipantNames(await this.redactOneOnOne(row, actor));
+    const named = await this.withParticipantNames(await this.redactOneOnOne(row, actor));
+    const [enriched] = await this.withActionItemOwnerNames([named]);
+    return enriched!;
   }
 
   async updateOneOnOne(id: string, dto: UpdateOneOnOneDto, actor: AuthenticatedUser) {
@@ -661,7 +672,9 @@ export class PerformanceService {
     const [row] = await this.db.update(oneOnOnes).set(patch).where(eq(oneOnOnes.id, id)).returning();
     if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to update 1:1');
     await this.record(actor, 'one_on_one.update', `one_on_one:${id}`, { after: { date: row.date } });
-    return this.withParticipantNames(await this.redactOneOnOne(row, actor));
+    const named = await this.withParticipantNames(await this.redactOneOnOne(row, actor));
+    const [enriched] = await this.withActionItemOwnerNames([named]);
+    return enriched!;
   }
 
   // ── Feedback ───────────────────────────────────────────────────────────────
@@ -823,6 +836,39 @@ export class PerformanceService {
       ...r,
       fromName: byId.get(r.fromEmployeeId) ?? null,
       toName: byId.get(r.toEmployeeId) ?? null,
+    }));
+  }
+
+  /**
+   * Attach each action item's owner display name across every row in one batched lookup. The
+   * result is response-only: `ownerName` must never be written back to the `action_items` jsonb
+   * column (see `ActionItemWithOwnerName`).
+   */
+  private async withActionItemOwnerNames<T extends { actionItems: ActionItem[] }>(
+    rows: T[],
+  ): Promise<(Omit<T, 'actionItems'> & { actionItems: ActionItemWithOwnerName[] })[]> {
+    if (rows.length === 0) return [];
+    const ownerIds = [
+      ...new Set(
+        rows
+          .flatMap((r) => r.actionItems.map((item) => item.ownerId))
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const byId = new Map<string, string | null>();
+    if (ownerIds.length > 0) {
+      const people = await this.db
+        .select({ id: employees.id, displayName: this.nameExpr() })
+        .from(employees)
+        .where(inArray(employees.id, ownerIds));
+      for (const p of people) byId.set(p.id, p.displayName);
+    }
+    return rows.map((r) => ({
+      ...r,
+      actionItems: r.actionItems.map((item) => ({
+        ...item,
+        ownerName: item.ownerId ? (byId.get(item.ownerId) ?? null) : null,
+      })),
     }));
   }
 
