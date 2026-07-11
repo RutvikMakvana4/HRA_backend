@@ -8,6 +8,8 @@ export * from './projects';
 export * from './expenses';
 export * from './performance';
 export * from './recruitment';
+export * from './assets';
+export * from './analytics';
 export * from './notifications';
 export * from './enums';
 export * from './_conventions';

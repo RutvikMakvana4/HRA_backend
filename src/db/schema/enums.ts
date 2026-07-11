@@ -257,3 +257,17 @@ export const scorecardRecommendation = pgEnum('scorecard_recommendation', [
 
 /** Offer lifecycle. `accepted` gates the hire → Employee conversion. */
 export const offerStatus = pgEnum('offer_status', ['draft', 'sent', 'accepted', 'declined']);
+
+// ── Module 10: Asset Management (PRD §5) ─────────────────────────────────────
+
+/** Nature of an asset category — hardware is single-custody, a software license is seat-based. */
+export const assetCategoryType = pgEnum('asset_category_type', ['hardware', 'software_license']);
+
+/** Asset lifecycle. `assigned` is set while an asset is in someone's custody; `retired`/`lost` are terminal. */
+export const assetStatus = pgEnum('asset_status', [
+  'available',
+  'assigned',
+  'in_repair',
+  'retired',
+  'lost',
+]);

@@ -71,6 +71,13 @@
       "when": 1783598099710,
       "tag": "0009_mighty_ted_forrester",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1783770284474,
+      "tag": "0010_numerous_peter_parker",
+      "breakpoints": true
     }
   ]
 }
