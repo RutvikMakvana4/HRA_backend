@@ -13,7 +13,6 @@ import {
   reviewTemplates,
   reviews,
   type ActionItem,
-  type Feedback,
   type Goal,
   type OneOnOne,
   type Review,
@@ -591,7 +590,8 @@ export class PerformanceService {
       .from(oneOnOnes)
       .where(and(...filters))
       .orderBy(desc(oneOnOnes.date));
-    return Promise.all(rows.map((r) => this.redactOneOnOne(r, actor)));
+    const redacted = await Promise.all(rows.map((r) => this.redactOneOnOne(r, actor)));
+    return Promise.all(redacted.map((r) => this.withParticipantNames(r)));
   }
 
   async createOneOnOne(dto: CreateOneOnOneDto, actor: AuthenticatedUser) {
@@ -640,7 +640,7 @@ export class PerformanceService {
     await this.record(actor, 'one_on_one.create', `one_on_one:${row.id}`, {
       after: { managerId, employeeId, date: dto.date },
     });
-    return this.redactOneOnOne(row, actor);
+    return this.withParticipantNames(await this.redactOneOnOne(row, actor));
   }
 
   async updateOneOnOne(id: string, dto: UpdateOneOnOneDto, actor: AuthenticatedUser) {
@@ -661,7 +661,7 @@ export class PerformanceService {
     const [row] = await this.db.update(oneOnOnes).set(patch).where(eq(oneOnOnes.id, id)).returning();
     if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to update 1:1');
     await this.record(actor, 'one_on_one.update', `one_on_one:${id}`, { after: { date: row.date } });
-    return this.redactOneOnOne(row, actor);
+    return this.withParticipantNames(await this.redactOneOnOne(row, actor));
   }
 
   // ── Feedback ───────────────────────────────────────────────────────────────
@@ -691,38 +691,42 @@ export class PerformanceService {
     await this.record(actor, 'feedback.create', `feedback:${row.id}`, {
       after: { toEmployeeId: dto.toEmployeeId, type: dto.type, visibility: dto.visibility },
     });
-    return row;
+    const [enriched] = await this.withFeedbackNames([row]);
+    return enriched!;
   }
 
-  async listFeedback(query: ListFeedbackDto, actor: AuthenticatedUser): Promise<Feedback[]> {
+  async listFeedback(query: ListFeedbackDto, actor: AuthenticatedUser) {
     if (query.scope === 'given') {
-      return this.db
+      const rows = await this.db
         .select()
         .from(feedback)
         .where(eq(feedback.fromEmployeeId, actor.id))
         .orderBy(desc(feedback.createdAt));
+      return this.withFeedbackNames(rows);
     }
     if (query.scope === 'team') {
-      // A manager sees `manager_visible` feedback addressed to their direct reports (never private).
-      const reportIds = await this.directReportIds(actor.id);
-      if (reportIds.length === 0) return [];
-      return this.db
+      // Admins see every manager-visible note org-wide; everyone else sees only their direct
+      // reports'. `manager_visible` is enforced on both paths — private feedback never leaks.
+      const filters: SQL[] = [eq(feedback.visibility, 'manager_visible')];
+      if (!isAdminOrAbove(actor)) {
+        const reportIds = await this.directReportIds(actor.id);
+        if (reportIds.length === 0) return [];
+        filters.push(inArray(feedback.toEmployeeId, reportIds));
+      }
+      const rows = await this.db
         .select()
         .from(feedback)
-        .where(
-          and(
-            inArray(feedback.toEmployeeId, reportIds),
-            eq(feedback.visibility, 'manager_visible'),
-          ),
-        )
+        .where(and(...filters))
         .orderBy(desc(feedback.createdAt));
+      return this.withFeedbackNames(rows);
     }
     // received: everything addressed to me, regardless of visibility.
-    return this.db
+    const rows = await this.db
       .select()
       .from(feedback)
       .where(eq(feedback.toEmployeeId, actor.id))
       .orderBy(desc(feedback.createdAt));
+    return this.withFeedbackNames(rows);
   }
 
   // ── internals ────────────────────────────────────────────────────────────────
@@ -786,6 +790,40 @@ export class PerformanceService {
   /** Give every action item a stable uuid, preserving ids the caller already sent. */
   private withItemIds(items: ActionItem[]): ActionItem[] {
     return items.map((item) => ({ ...item, id: item.id ?? randomUUID() }));
+  }
+
+  /** Attach the two participants' display names to a 1:1 row. */
+  private async withParticipantNames<T extends { managerId: string; employeeId: string }>(
+    row: T,
+  ): Promise<T & { managerName: string | null; employeeName: string | null }> {
+    const rows = await this.db
+      .select({ id: employees.id, displayName: employees.displayName })
+      .from(employees)
+      .where(inArray(employees.id, [row.managerId, row.employeeId]));
+    const byId = new Map(rows.map((e) => [e.id, e.displayName]));
+    return {
+      ...row,
+      managerName: byId.get(row.managerId) ?? null,
+      employeeName: byId.get(row.employeeId) ?? null,
+    };
+  }
+
+  /** Attach the author's and recipient's display names to a feedback row. */
+  private async withFeedbackNames<T extends { fromEmployeeId: string; toEmployeeId: string }>(
+    rows: T[],
+  ): Promise<(T & { fromName: string | null; toName: string | null })[]> {
+    if (rows.length === 0) return [];
+    const ids = [...new Set(rows.flatMap((r) => [r.fromEmployeeId, r.toEmployeeId]))];
+    const people = await this.db
+      .select({ id: employees.id, displayName: employees.displayName })
+      .from(employees)
+      .where(inArray(employees.id, ids));
+    const byId = new Map(people.map((e) => [e.id, e.displayName]));
+    return rows.map((r) => ({
+      ...r,
+      fromName: byId.get(r.fromEmployeeId) ?? null,
+      toName: byId.get(r.toEmployeeId) ?? null,
+    }));
   }
 
   /** Strip manager-only `privateNotes` unless the viewer is the manager or an admin. */
