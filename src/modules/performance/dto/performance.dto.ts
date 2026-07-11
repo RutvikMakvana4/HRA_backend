@@ -133,6 +133,7 @@ export const assignPeerSchema = z.object({
 // ── 1:1s ─────────────────────────────────────────────────────────────────────
 
 const actionItemSchema = z.object({
+  id: z.uuid().optional(),
   text: z.string().trim().min(1).max(500),
   ownerId: z.uuid().optional(),
   done: z.boolean().default(false),

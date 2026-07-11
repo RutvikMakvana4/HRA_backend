@@ -26,7 +26,7 @@ import {
 /** One competency line inside a review template's `competencies` list. */
 export type Competency = { id?: string; label: string; description?: string; ratingScale: number };
 /** One action item on a 1:1 (`actionItems` list). */
-export type ActionItem = { text: string; ownerId?: string; done: boolean };
+export type ActionItem = { id?: string; text: string; ownerId?: string; done: boolean };
 
 /**
  * A review cycle. Going `active` snapshots `review` rows for every active employee based on the

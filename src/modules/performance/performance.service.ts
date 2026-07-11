@@ -12,6 +12,7 @@ import {
   reviewCycles,
   reviewTemplates,
   reviews,
+  type ActionItem,
   type Feedback,
   type Goal,
   type OneOnOne,
@@ -629,7 +630,7 @@ export class PerformanceService {
         date: dto.date,
         sharedNotes: dto.sharedNotes ?? null,
         privateNotes: dto.privateNotes ?? null,
-        actionItems: dto.actionItems,
+        actionItems: this.withItemIds(dto.actionItems),
       })
       .returning();
     if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to create 1:1');
@@ -656,7 +657,7 @@ export class PerformanceService {
     if (dto.date !== undefined) patch.date = dto.date;
     if (dto.sharedNotes !== undefined) patch.sharedNotes = dto.sharedNotes;
     if (dto.privateNotes !== undefined) patch.privateNotes = dto.privateNotes;
-    if (dto.actionItems !== undefined) patch.actionItems = dto.actionItems;
+    if (dto.actionItems !== undefined) patch.actionItems = this.withItemIds(dto.actionItems);
     const [row] = await this.db.update(oneOnOnes).set(patch).where(eq(oneOnOnes.id, id)).returning();
     if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to update 1:1');
     await this.record(actor, 'one_on_one.update', `one_on_one:${id}`, { after: { date: row.date } });
@@ -780,6 +781,11 @@ export class PerformanceService {
     if (isAdminOrAbove(actor)) return;
     if (await this.employeesService.isManagerOf(actor.id, employeeId)) return;
     throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to view these 1:1s', HttpStatus.FORBIDDEN);
+  }
+
+  /** Give every action item a stable uuid, preserving ids the caller already sent. */
+  private withItemIds(items: ActionItem[]): ActionItem[] {
+    return items.map((item) => ({ ...item, id: item.id ?? randomUUID() }));
   }
 
   /** Strip manager-only `privateNotes` unless the viewer is the manager or an admin. */
