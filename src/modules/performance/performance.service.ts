@@ -797,7 +797,7 @@ export class PerformanceService {
     row: T,
   ): Promise<T & { managerName: string | null; employeeName: string | null }> {
     const rows = await this.db
-      .select({ id: employees.id, displayName: employees.displayName })
+      .select({ id: employees.id, displayName: this.nameExpr() })
       .from(employees)
       .where(inArray(employees.id, [row.managerId, row.employeeId]));
     const byId = new Map(rows.map((e) => [e.id, e.displayName]));
@@ -815,7 +815,7 @@ export class PerformanceService {
     if (rows.length === 0) return [];
     const ids = [...new Set(rows.flatMap((r) => [r.fromEmployeeId, r.toEmployeeId]))];
     const people = await this.db
-      .select({ id: employees.id, displayName: employees.displayName })
+      .select({ id: employees.id, displayName: this.nameExpr() })
       .from(employees)
       .where(inArray(employees.id, ids));
     const byId = new Map(people.map((e) => [e.id, e.displayName]));
