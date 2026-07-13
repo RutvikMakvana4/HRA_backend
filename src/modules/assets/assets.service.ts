@@ -12,7 +12,7 @@ import {
   type AssetCategory,
 } from '../../db/schema';
 import { DRIZZLE } from '../../common/constants';
-import { AppError, ErrorCode } from '../../common/errors/app-error';
+import { AppError, ErrorCode, pgErrorCode } from '../../common/errors/app-error';
 import { AUDIT_SERVICE, type AuditService } from '../../common/audit/audit.interface';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { EmployeesService } from '../employees/employees.service';
@@ -45,10 +45,22 @@ export class AssetsService {
   }
 
   async createCategory(dto: CreateAssetCategoryDto, actor: AuthenticatedUser) {
-    const [row] = await this.db
-      .insert(assetCategories)
-      .values({ name: dto.name, type: dto.type })
-      .returning();
+    let row: AssetCategory | undefined;
+    try {
+      [row] = await this.db
+        .insert(assetCategories)
+        .values({ name: dto.name, type: dto.type })
+        .returning();
+    } catch (err) {
+      if (pgErrorCode(err) === '23505') {
+        throw new AppError(
+          ErrorCode.CONFLICT,
+          `A category named "${dto.name}" already exists`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw err;
+    }
     if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to create asset category');
     await this.record(actor, 'asset_category.create', `asset_category:${row.id}`, {
       after: { name: row.name, type: row.type },
@@ -151,23 +163,35 @@ export class AssetsService {
 
   async createAsset(dto: CreateAssetDto, actor: AuthenticatedUser) {
     await this.getCategoryRow(dto.categoryId);
-    const [row] = await this.db
-      .insert(assets)
-      .values({
-        assetTag: dto.assetTag,
-        categoryId: dto.categoryId,
-        make: dto.make ?? null,
-        model: dto.model ?? null,
-        serialNumber: dto.serialNumber ?? null,
-        purchaseDate: dto.purchaseDate ?? null,
-        purchaseCost: dto.purchaseCost == null ? null : BigInt(dto.purchaseCost),
-        warrantyExpiry: dto.warrantyExpiry ?? null,
-        notes: dto.notes ?? null,
-        vendor: dto.vendor ?? null,
-        seatsTotal: dto.seatsTotal ?? null,
-        renewalDate: dto.renewalDate ?? null,
-      })
-      .returning();
+    let row: Asset | undefined;
+    try {
+      [row] = await this.db
+        .insert(assets)
+        .values({
+          assetTag: dto.assetTag,
+          categoryId: dto.categoryId,
+          make: dto.make ?? null,
+          model: dto.model ?? null,
+          serialNumber: dto.serialNumber ?? null,
+          purchaseDate: dto.purchaseDate ?? null,
+          purchaseCost: dto.purchaseCost == null ? null : BigInt(dto.purchaseCost),
+          warrantyExpiry: dto.warrantyExpiry ?? null,
+          notes: dto.notes ?? null,
+          vendor: dto.vendor ?? null,
+          seatsTotal: dto.seatsTotal ?? null,
+          renewalDate: dto.renewalDate ?? null,
+        })
+        .returning();
+    } catch (err) {
+      if (pgErrorCode(err) === '23505') {
+        throw new AppError(
+          ErrorCode.CONFLICT,
+          `An asset with tag "${dto.assetTag}" already exists`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw err;
+    }
     if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to create asset');
     await this.record(actor, 'asset.create', `asset:${row.id}`, {
       after: { assetTag: row.assetTag, status: row.status },
@@ -274,7 +298,11 @@ export class AssetsService {
       .update(assets)
       .set({
         status: 'assigned',
-        seatsUsed: isLicense ? asset.seatsUsed + 1 : asset.seatsUsed,
+        // Relative, in SQL, so the database does the arithmetic — writing the absolute value
+        // `asset.seatsUsed + 1` from the stale read above loses an update under ANY two
+        // concurrent assignments, not just a race for the last seat. Hardware has no seat
+        // concept, so leave `seatsUsed` untouched rather than rewriting it unchanged.
+        ...(isLicense ? { seatsUsed: sql`${assets.seatsUsed} + 1` } : {}),
         updatedAt: new Date(),
       })
       .where(eq(assets.id, assetId));
@@ -336,7 +364,21 @@ export class AssetsService {
       })
       .where(eq(assetAssignments.id, assignment.id));
 
-    const seatsUsed = isLicense ? Math.max(0, asset.seatsUsed - 1) : 0;
+    // Relative, in SQL — writing the absolute `asset.seatsUsed - 1` from the stale read above
+    // loses an update under ANY two concurrent returns/assignments, and a later return could
+    // then zero a count that should still be positive. Hardware has no seat concept and always
+    // reads back 0. Read the POST-update count back via `.returning()` — deciding `nextStatus`
+    // from the stale `asset.seatsUsed` instead would flip a still-held licence to `available`,
+    // which is the exact bug being fixed here.
+    let seatsUsed = 0;
+    if (isLicense) {
+      const [seatRow] = await this.db
+        .update(assets)
+        .set({ seatsUsed: sql`greatest(${assets.seatsUsed} - 1, 0)`, updatedAt: new Date() })
+        .where(eq(assets.id, assetId))
+        .returning({ seatsUsed: assets.seatsUsed });
+      seatsUsed = seatRow?.seatsUsed ?? 0;
+    }
     // In-repair assets stay in repair on return; otherwise a fully-returned asset is available.
     const nextStatus =
       asset.status === 'in_repair'
@@ -346,7 +388,7 @@ export class AssetsService {
           : 'available';
     await this.db
       .update(assets)
-      .set({ status: nextStatus, seatsUsed, updatedAt: new Date() })
+      .set({ status: nextStatus, updatedAt: new Date() })
       .where(eq(assets.id, assetId));
 
     await this.record(actor, 'asset.return', `asset:${assetId}`, {
