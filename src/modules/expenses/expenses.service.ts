@@ -225,14 +225,18 @@ export class ExpensesService {
     // join — an undecided claim should come back with approverName: null, not an error or "".
     // A second alias of `employees` is required because the approver and the claim's own employee
     // are two different rows from the same table (same convention as `reviewer`/`managers` elsewhere).
+    // The claimant is joined too (inner — every claim has an owner), the same way listClaims does it,
+    // so the detail carries employeeName exactly like the list row already does.
     const approver = alias(employees, 'approver');
-    const [approverRow] = await this.db
+    const [nameRow] = await this.db
       .select({
+        employeeName: this.nameExpr(),
         approverName: sql<
           string | null
         >`coalesce(${approver.displayName}, ${approver.firstName} || ' ' || ${approver.lastName})`,
       })
       .from(expenseClaims)
+      .innerJoin(employees, eq(employees.id, expenseClaims.employeeId))
       .leftJoin(approver, eq(approver.id, expenseClaims.approverId))
       .where(eq(expenseClaims.id, id))
       .limit(1);
@@ -260,7 +264,8 @@ export class ExpensesService {
     return {
       ...claim,
       totalAmount: this.toMinor(claim.totalAmount) ?? 0,
-      approverName: approverRow?.approverName ?? null,
+      employeeName: nameRow?.employeeName ?? null,
+      approverName: nameRow?.approverName ?? null,
       lineItems,
       capWarnings,
     };
@@ -473,7 +478,11 @@ export class ExpensesService {
       .where(eq(expenseClaims.id, claimId));
   }
 
-  /** Soft cap-breach warnings: per capped category in the claim, sum vs the category's monthly cap. */
+  /**
+   * Soft cap-breach warnings: per capped category, this CLAIM's own total vs the category's cap.
+   * This sums line items within the one claim only — it is not a real monthly aggregate across a
+   * claimant's other claims that month, so the message says "in this claim", not "monthly".
+   */
   private async capWarnings(claimId: string): Promise<string[]> {
     const rows = await this.db
       .select({
@@ -489,7 +498,7 @@ export class ExpensesService {
     const warnings: string[] = [];
     for (const r of rows) {
       if (r.monthlyCap != null && BigInt(r.spent) > r.monthlyCap) {
-        warnings.push(`${r.categoryName} exceeds its monthly cap`);
+        warnings.push(`${r.categoryName} total in this claim exceeds its cap`);
       }
     }
     return warnings;
