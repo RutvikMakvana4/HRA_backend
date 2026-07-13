@@ -1,8 +1,9 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import { alias } from 'drizzle-orm/pg-core';
 import type { Database } from '../../db/client';
 import {
+  documents,
   employees,
   expenseCategories,
   expenseClaims,
@@ -241,6 +242,11 @@ export class ExpensesService {
       .where(eq(expenseClaims.id, id))
       .limit(1);
 
+    // receiptDocumentId is a nullable FK (a line item may have no receipt), so this must be a LEFT
+    // join — an item without one should come back with receiptName: null, not drop the row. The
+    // join's own ON clause also excludes a soft-deleted document (deletedAt IS NOT NULL), the same
+    // convention documents.service.ts and recruitment.service.ts use everywhere else they read a
+    // document row, so a receipt the employee deleted afterwards reads as no-receipt, not stale.
     const items = await this.db
       .select({
         id: expenseLineItems.id,
@@ -252,10 +258,15 @@ export class ExpensesService {
         amount: expenseLineItems.amount,
         description: expenseLineItems.description,
         receiptDocumentId: expenseLineItems.receiptDocumentId,
+        receiptName: documents.title,
         merchant: expenseLineItems.merchant,
       })
       .from(expenseLineItems)
       .innerJoin(expenseCategories, eq(expenseCategories.id, expenseLineItems.categoryId))
+      .leftJoin(
+        documents,
+        and(eq(documents.id, expenseLineItems.receiptDocumentId), isNull(documents.deletedAt)),
+      )
       .where(eq(expenseLineItems.claimId, id))
       .orderBy(asc(expenseLineItems.expenseDate));
 
