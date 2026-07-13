@@ -108,6 +108,19 @@ export class AssetsService {
         seatsUsed: assets.seatsUsed,
         renewalDate: assets.renewalDate,
         notes: assets.notes,
+        // The employee on this asset's OPEN assignment. A correlated scalar subquery keeps the
+        // result at exactly one row per asset — a leftJoin would duplicate a multi-seat licence.
+        // `"assets"."id"` is written literally on purpose: an interpolated ${assets.id} emits
+        // UNQUALIFIED inside a raw subquery, so Postgres would resolve it against asset_assignments
+        // and the predicate would never match.
+        holderName: sql<string | null>`(
+          select ${this.nameExpr()}
+          from asset_assignments aa
+          join employees on employees.id = aa.employee_id
+          where aa.asset_id = "assets"."id" and aa.returned_at is null
+          order by aa.assigned_at desc
+          limit 1
+        )`,
       })
       .from(assets)
       .innerJoin(assetCategories, eq(assetCategories.id, assets.categoryId))
