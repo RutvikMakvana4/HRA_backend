@@ -1,5 +1,6 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/pg-core';
 import type { Database } from '../../db/client';
 import {
   employees,
@@ -220,6 +221,22 @@ export class ExpensesService {
     const claim = await this.getClaimRow(id);
     await this.assertCanView(claim, actor);
 
+    // approverId is nullable (draft/submitted claims have no approver yet), so this must be a LEFT
+    // join — an undecided claim should come back with approverName: null, not an error or "".
+    // A second alias of `employees` is required because the approver and the claim's own employee
+    // are two different rows from the same table (same convention as `reviewer`/`managers` elsewhere).
+    const approver = alias(employees, 'approver');
+    const [approverRow] = await this.db
+      .select({
+        approverName: sql<
+          string | null
+        >`coalesce(${approver.displayName}, ${approver.firstName} || ' ' || ${approver.lastName})`,
+      })
+      .from(expenseClaims)
+      .leftJoin(approver, eq(approver.id, expenseClaims.approverId))
+      .where(eq(expenseClaims.id, id))
+      .limit(1);
+
     const items = await this.db
       .select({
         id: expenseLineItems.id,
@@ -243,6 +260,7 @@ export class ExpensesService {
     return {
       ...claim,
       totalAmount: this.toMinor(claim.totalAmount) ?? 0,
+      approverName: approverRow?.approverName ?? null,
       lineItems,
       capWarnings,
     };
