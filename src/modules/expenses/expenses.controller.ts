@@ -26,6 +26,7 @@ import {
   DecideClaimDto,
   ListClaimsDto,
   ReimburseClaimDto,
+  SpendOverviewDto,
   UpdateCategoryDto,
   UpdateClaimDto,
   UpdateLineItemDto,
@@ -77,6 +78,11 @@ export class ExpenseClaimsController {
   @Post()
   create(@Body() dto: CreateClaimDto, @CurrentUser() actor: AuthenticatedUser) {
     return this.expenses.createClaim(dto, actor);
+  }
+
+  @Get('spend-overview')
+  spendOverview(@Query() query: SpendOverviewDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.expenses.spendOverview(query, actor);
   }
 
   @Get(':id')

@@ -46,6 +46,10 @@ export const listClaimsSchema = z.object({
   projectId: z.uuid().optional(),
 });
 
+export const spendOverviewSchema = z.object({
+  scope: z.enum(['me', 'team', 'all']).default('me'),
+});
+
 // ── Line items ────────────────────────────────────────────────────────────────
 
 export const addLineItemSchema = z.object({
@@ -84,6 +88,7 @@ export class UpdateCategoryDto extends createZodDto(updateCategorySchema) {}
 export class CreateClaimDto extends createZodDto(createClaimSchema) {}
 export class UpdateClaimDto extends createZodDto(updateClaimSchema) {}
 export class ListClaimsDto extends createZodDto(listClaimsSchema) {}
+export class SpendOverviewDto extends createZodDto(spendOverviewSchema) {}
 export class AddLineItemDto extends createZodDto(addLineItemSchema) {}
 export class UpdateLineItemDto extends createZodDto(updateLineItemSchema) {}
 export class DecideClaimDto extends createZodDto(decideClaimSchema) {}

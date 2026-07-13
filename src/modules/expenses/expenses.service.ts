@@ -12,7 +12,7 @@ import {
   type ExpenseLineItem,
 } from '../../db/schema';
 import { DRIZZLE } from '../../common/constants';
-import { AppError, ErrorCode } from '../../common/errors/app-error';
+import { AppError, ErrorCode, pgErrorCode } from '../../common/errors/app-error';
 import { AUDIT_SERVICE, type AuditService } from '../../common/audit/audit.interface';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { isAdminOrAbove, isSuperAdmin } from '../auth/roles';
@@ -22,6 +22,7 @@ import type {
   CreateCategoryDto,
   CreateClaimDto,
   ListClaimsDto,
+  SpendOverviewDto,
   UpdateCategoryDto,
   UpdateClaimDto,
   UpdateLineItemDto,
@@ -46,16 +47,18 @@ export class ExpensesService {
   }
 
   async createCategory(dto: CreateCategoryDto, actor: AuthenticatedUser) {
-    const [row] = await this.mapWrite(() =>
-      this.db
-        .insert(expenseCategories)
-        .values({
-          name: dto.name,
-          requiresReceipt: dto.requiresReceipt,
-          monthlyCap: dto.monthlyCap == null ? null : BigInt(dto.monthlyCap),
-          isActive: dto.isActive,
-        })
-        .returning(),
+    const [row] = await this.mapWrite(
+      () =>
+        this.db
+          .insert(expenseCategories)
+          .values({
+            name: dto.name,
+            requiresReceipt: dto.requiresReceipt,
+            monthlyCap: dto.monthlyCap == null ? null : BigInt(dto.monthlyCap),
+            isActive: dto.isActive,
+          })
+          .returning(),
+      `A category named "${dto.name}" already exists`,
     );
     if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to create category');
     await this.record(actor, 'expense_category.create', `expense_category:${row.id}`, { after: { name: row.name } });
@@ -69,8 +72,9 @@ export class ExpensesService {
     if (dto.requiresReceipt !== undefined) patch.requiresReceipt = dto.requiresReceipt;
     if (dto.monthlyCap !== undefined) patch.monthlyCap = dto.monthlyCap == null ? null : BigInt(dto.monthlyCap);
     if (dto.isActive !== undefined) patch.isActive = dto.isActive;
-    const [row] = await this.mapWrite(() =>
-      this.db.update(expenseCategories).set(patch).where(eq(expenseCategories.id, id)).returning(),
+    const [row] = await this.mapWrite(
+      () => this.db.update(expenseCategories).set(patch).where(eq(expenseCategories.id, id)).returning(),
+      dto.name ? `A category named "${dto.name}" already exists` : undefined,
     );
     if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to update category');
     await this.record(actor, 'expense_category.update', `expense_category:${id}`, { after: { name: row.name } });
@@ -148,6 +152,67 @@ export class ExpensesService {
       .where(filters.length ? and(...filters) : undefined)
       .orderBy(desc(expenseClaims.createdAt));
     return rows.map((r) => ({ ...r, totalAmount: this.toMinor(r.totalAmount) ?? 0 }));
+  }
+
+  /**
+   * Spend across approved + reimbursed claims. Aggregated in SQL: a category lives on the LINE ITEM,
+   * not the claim, so the by-category breakdown cannot be derived from claim rows alone.
+   */
+  async spendOverview(query: SpendOverviewDto, actor: AuthenticatedUser) {
+    // Same scope rule and guard as listClaims.
+    const scopeFilters: SQL[] = [];
+    if (query.scope === 'me') {
+      scopeFilters.push(eq(expenseClaims.employeeId, actor.id));
+    } else if (query.scope === 'team') {
+      const reportIds = await this.directReportIds(actor.id);
+      if (reportIds.length === 0) return { byCurrency: [], byCategory: [] };
+      scopeFilters.push(inArray(expenseClaims.employeeId, reportIds));
+    } else {
+      if (!isAdminOrAbove(actor)) {
+        throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to view all spend', HttpStatus.FORBIDDEN);
+      }
+    }
+    // Only settled spend counts.
+    scopeFilters.push(inArray(expenseClaims.status, ['approved', 'reimbursed']));
+    const where = and(...scopeFilters);
+
+    const currencyRows = await this.db
+      .select({
+        currency: expenseClaims.currency,
+        // sum() over a bigint column comes back as a STRING — never a bigint.
+        total: sql<string>`coalesce(sum(${expenseClaims.totalAmount}), 0)`,
+        claimCount: sql<number>`cast(count(*) as int)`,
+      })
+      .from(expenseClaims)
+      .where(where)
+      .groupBy(expenseClaims.currency);
+
+    const categoryRows = await this.db
+      .select({
+        categoryId: expenseCategories.id,
+        categoryName: expenseCategories.name,
+        currency: expenseClaims.currency,
+        total: sql<string>`coalesce(sum(${expenseLineItems.amount}), 0)`,
+      })
+      .from(expenseLineItems)
+      .innerJoin(expenseClaims, eq(expenseClaims.id, expenseLineItems.claimId))
+      .innerJoin(expenseCategories, eq(expenseCategories.id, expenseLineItems.categoryId))
+      .where(where)
+      .groupBy(expenseCategories.id, expenseCategories.name, expenseClaims.currency);
+
+    return {
+      byCurrency: currencyRows.map((r) => ({
+        currency: r.currency,
+        total: Number(BigInt(r.total)),
+        claimCount: r.claimCount,
+      })),
+      byCategory: categoryRows.map((r) => ({
+        categoryId: r.categoryId,
+        categoryName: r.categoryName,
+        currency: r.currency,
+        total: Number(BigInt(r.total)),
+      })),
+    };
   }
 
   /** A claim with its line items and (approver-facing) cap-breach warnings. */
@@ -483,12 +548,18 @@ export class ExpensesService {
     await this.audit.record({ actorType: actor.type, actorId: actor.id, action, target, ...data });
   }
 
-  private async mapWrite<T>(work: () => Promise<T>): Promise<T> {
+  private async mapWrite<T>(work: () => Promise<T>, conflictMessage?: string): Promise<T> {
     try {
       return await work();
     } catch (err) {
-      if (typeof err === 'object' && err !== null && 'code' in err && err.code === '23505') {
-        throw new AppError(ErrorCode.CONFLICT, 'A record with that unique key already exists', HttpStatus.CONFLICT);
+      // drizzle-orm wraps the real pg error in DrizzleQueryError.cause, so `err.code` is never set at
+      // the top level — pgErrorCode() walks the cause chain to find it (see assets.service.ts).
+      if (pgErrorCode(err) === '23505') {
+        throw new AppError(
+          ErrorCode.CONFLICT,
+          conflictMessage ?? 'A record with that unique key already exists',
+          HttpStatus.CONFLICT,
+        );
       }
       throw err;
     }
