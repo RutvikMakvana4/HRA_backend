@@ -73,11 +73,23 @@ export class AssetsService {
     const patch: Partial<typeof assetCategories.$inferInsert> = { updatedAt: new Date() };
     if (dto.name !== undefined) patch.name = dto.name;
     if (dto.type !== undefined) patch.type = dto.type;
-    const [row] = await this.db
-      .update(assetCategories)
-      .set(patch)
-      .where(eq(assetCategories.id, id))
-      .returning();
+    let row: AssetCategory | undefined;
+    try {
+      [row] = await this.db
+        .update(assetCategories)
+        .set(patch)
+        .where(eq(assetCategories.id, id))
+        .returning();
+    } catch (err) {
+      if (pgErrorCode(err) === '23505') {
+        throw new AppError(
+          ErrorCode.CONFLICT,
+          `A category named "${dto.name}" already exists`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw err;
+    }
     if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to update asset category');
     await this.record(actor, 'asset_category.update', `asset_category:${id}`, {
       after: { name: row.name },
@@ -227,7 +239,19 @@ export class AssetsService {
       }
     }
 
-    const [row] = await this.db.update(assets).set(patch).where(eq(assets.id, id)).returning();
+    let row: Asset | undefined;
+    try {
+      [row] = await this.db.update(assets).set(patch).where(eq(assets.id, id)).returning();
+    } catch (err) {
+      if (pgErrorCode(err) === '23505') {
+        throw new AppError(
+          ErrorCode.CONFLICT,
+          `An asset with tag "${dto.assetTag}" already exists`,
+          HttpStatus.CONFLICT,
+        );
+      }
+      throw err;
+    }
     if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to update asset');
     await this.record(actor, 'asset.update', `asset:${id}`, {
       before: { status: before.status },
@@ -366,29 +390,34 @@ export class AssetsService {
 
     // Relative, in SQL — writing the absolute `asset.seatsUsed - 1` from the stale read above
     // loses an update under ANY two concurrent returns/assignments, and a later return could
-    // then zero a count that should still be positive. Hardware has no seat concept and always
-    // reads back 0. Read the POST-update count back via `.returning()` — deciding `nextStatus`
-    // from the stale `asset.seatsUsed` instead would flip a still-held licence to `available`,
-    // which is the exact bug being fixed here.
-    let seatsUsed = 0;
-    if (isLicense) {
-      const [seatRow] = await this.db
-        .update(assets)
-        .set({ seatsUsed: sql`greatest(${assets.seatsUsed} - 1, 0)`, updatedAt: new Date() })
-        .where(eq(assets.id, assetId))
-        .returning({ seatsUsed: assets.seatsUsed });
-      seatsUsed = seatRow?.seatsUsed ?? 0;
-    }
-    // In-repair assets stay in repair on return; otherwise a fully-returned asset is available.
-    const nextStatus =
-      asset.status === 'in_repair'
-        ? 'in_repair'
-        : isLicense && seatsUsed > 0
-          ? 'assigned'
-          : 'available';
+    // then zero a count that should still be positive. Hardware has no seat concept, so its
+    // `seatsUsed` is left untouched entirely (never included in the SET below).
+    //
+    // The seat decrement and the status it implies MUST land in a single UPDATE. Splitting them
+    // into "decrement, read the count back, then write status from that read" (the previous
+    // shape) leaves a window between the two statements where a concurrent assign can bump
+    // `seatsUsed` back up and flip status to `assigned` — the second statement then overwrites
+    // that with a status computed from a now-stale read, stranding the licence as `available`
+    // while a seat is out. Deciding status in the same statement, from the post-decrement value,
+    // closes that window. In-repair assets stay in repair on return; `status` is compared against
+    // (and defaults to) the pre-update column so the "in repair" case doesn't need a re-typed
+    // string literal.
     await this.db
       .update(assets)
-      .set({ status: nextStatus, updatedAt: new Date() })
+      .set({
+        ...(isLicense ? { seatsUsed: sql`greatest(${assets.seatsUsed} - 1, 0)` } : {}),
+        status: isLicense
+          ? sql`case
+              when ${assets.status} = 'in_repair' then ${assets.status}
+              when greatest(${assets.seatsUsed} - 1, 0) > 0 then 'assigned'::asset_status
+              else 'available'::asset_status
+            end`
+          : sql`case
+              when ${assets.status} = 'in_repair' then ${assets.status}
+              else 'available'::asset_status
+            end`,
+        updatedAt: new Date(),
+      })
       .where(eq(assets.id, assetId));
 
     await this.record(actor, 'asset.return', `asset:${assetId}`, {
