@@ -12,6 +12,11 @@ export interface AccessTokenPayload {
   /** user_accounts id */
   uid: string;
   roles: Role[];
+  /**
+   * Capability codes granted to this account. Optional on the way IN: tokens signed before this
+   * claim existed are still in circulation and must keep working — see JwtAuthGuard.
+   */
+  permissions?: string[];
   sid: string;
   type: 'user' | 'admin';
 }
@@ -38,6 +43,7 @@ export class TokenService {
     employeeId: string;
     accountId: string;
     role: Role;
+    permissions: string[];
     sid: string;
   }): Promise<IssuedAccessToken> {
     const expiresIn = this.config.get('JWT_ACCESS_TTL');
@@ -45,6 +51,7 @@ export class TokenService {
       sub: input.employeeId,
       uid: input.accountId,
       roles: [input.role],
+      permissions: input.permissions,
       sid: input.sid,
       type: actorTypeForRole(input.role),
     };

@@ -20,6 +20,8 @@ interface AccessTokenClaims {
   sub: string;
   uid: string;
   roles?: string[];
+  /** Optional: tokens signed before this claim existed carry no permissions. */
+  permissions?: string[];
   sid: string;
   type?: 'user' | 'admin';
 }
@@ -67,7 +69,12 @@ export class JwtAuthGuard implements CanActivate {
       id: claims.sub,
       uid: claims.uid,
       roles: claims.roles ?? [],
-      permissions: [],
+      // `?? []` is load-bearing, not defensive. Every access token signed before the `permissions`
+      // claim existed is still valid and still in circulation; without this fallback
+      // `claims.permissions` is undefined and the first `actor.permissions.includes(...)` throws,
+      // breaking every signed-in user until their token expires. An old token simply carries no
+      // permissions — which is correct — so the deploy forces nobody to log in again.
+      permissions: claims.permissions ?? [],
       scope: null,
       sid: claims.sid,
       type: claims.type ?? 'user',

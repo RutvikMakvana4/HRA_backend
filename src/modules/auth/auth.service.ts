@@ -163,6 +163,7 @@ export class AuthService {
       employeeId: account.employeeId,
       accountId: account.id,
       role: account.role,
+      permissions: account.permissions,
       sid,
     });
     return {

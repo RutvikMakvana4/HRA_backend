@@ -18,6 +18,7 @@ import { AppError, ErrorCode, pgErrorCode } from '../../common/errors/app-error'
 import { AUDIT_SERVICE, type AuditService } from '../../common/audit/audit.interface';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { isAdminOrAbove, isSuperAdmin } from '../auth/roles';
+import { Permission } from '../auth/permissions';
 import { EmployeesService } from '../employees/employees.service';
 import type {
   AddLineItemDto,
@@ -29,9 +30,6 @@ import type {
   UpdateClaimDto,
   UpdateLineItemDto,
 } from './dto/expenses.dto';
-
-/** Permission code that (besides super_admin) grants the final `reimbursed` transition (PRD §2). */
-const FINANCE_PERMISSION = 'finance';
 
 @Injectable()
 export class ExpensesService {
@@ -516,7 +514,7 @@ export class ExpensesService {
   }
 
   private hasFinanceFlag(actor: AuthenticatedUser): boolean {
-    return isSuperAdmin(actor) || actor.permissions.includes(FINANCE_PERMISSION);
+    return isSuperAdmin(actor) || actor.permissions.includes(Permission.FINANCE);
   }
 
   private assertOwner(claim: ExpenseClaim, actor: AuthenticatedUser): void {
