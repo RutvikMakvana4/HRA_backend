@@ -1,6 +1,7 @@
 import { createZodDto } from 'nestjs-zod';
 import { z } from 'zod';
 import { accountStatus, userRole } from '../../../db/schema/enums';
+import { PERMISSION_CODES } from '../permissions';
 
 /** Create a login account for an existing employee and assign a role (Super Admin). */
 export const createUserAccountSchema = z.object({
@@ -12,6 +13,19 @@ export const createUserAccountSchema = z.object({
 export const setRoleSchema = z.object({ role: z.enum(userRole.enumValues) });
 export const setStatusSchema = z.object({ status: z.enum(accountStatus.enumValues) });
 export const resetPasswordSchema = z.object({ newPassword: z.string().min(8).max(128) });
+
+/**
+ * SET semantics, not toggle: the body carries the account's COMPLETE permission list, exactly as
+ * setRoleSchema carries the complete new role. Grant is ["finance"]; revoke is [].
+ *
+ * `.strict()` is mandatory. A non-strict schema SILENTLY STRIPS an unknown key — an unrecognised
+ * permission code must be a loud 400, never a quiet drop.
+ */
+export const setPermissionsSchema = z
+  .object({
+    permissions: z.array(z.enum(PERMISSION_CODES)),
+  })
+  .strict();
 
 /** Filters for the audit-log reader (Super Admin). */
 export const listAuditLogsSchema = z.object({
@@ -27,3 +41,4 @@ export class SetRoleDto extends createZodDto(setRoleSchema) {}
 export class SetStatusDto extends createZodDto(setStatusSchema) {}
 export class ResetPasswordDto extends createZodDto(resetPasswordSchema) {}
 export class ListAuditLogsDto extends createZodDto(listAuditLogsSchema) {}
+export class SetPermissionsDto extends createZodDto(setPermissionsSchema) {}

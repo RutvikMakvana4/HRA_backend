@@ -9,7 +9,7 @@ export interface AuthenticatedUser {
   uid: string;
   /** Primary role(s) held (currently exactly one). */
   roles: string[];
-  /** Resolved permission codes (reserved; empty for now). */
+  /** Permission codes granted to the account (`user_accounts.permissions`), carried in the access token. */
   permissions: string[];
   /** Scope restriction; null = unrestricted. */
   scope: null;

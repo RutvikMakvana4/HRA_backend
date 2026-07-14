@@ -13,6 +13,7 @@ import { isSuperAdmin, Role } from './roles';
 import type {
   CreateUserAccountDto,
   ResetPasswordDto,
+  SetPermissionsDto,
   SetRoleDto,
   SetStatusDto,
 } from './dto/admin-users.dto';
@@ -129,6 +130,31 @@ export class AdminUsersService {
     return this.sanitize(row);
   }
 
+  async setPermissions(
+    accountId: string,
+    dto: SetPermissionsDto,
+    actor: AuthenticatedUser,
+  ): Promise<SafeAccount> {
+    const before = await this.getOrThrow(accountId);
+    // Set semantics: the body is the complete list. De-duplicate so a client sending the same code
+    // twice cannot write ['finance','finance'] into the column and out into every future token.
+    const permissions = [...new Set(dto.permissions)];
+    const row = await this.applyChange(accountId, { permissions }, actor);
+    // Revoke, exactly as setRole does. The permissions live in the access token, so without this a
+    // REVOKED permission would keep working until the token expired — unacceptable for a permission
+    // that authorises money movement. The target is logged out of every device and must sign in again.
+    await this.sessions.revokeAllForUser(accountId);
+    await this.audit.record({
+      actorType: actor.type,
+      actorId: actor.id,
+      action: 'admin.user.set_permissions',
+      target: `user_account:${accountId}`,
+      before: { permissions: before.permissions },
+      after: { permissions: row.permissions },
+    });
+    return this.sanitize(row);
+  }
+
   async resetPassword(
     accountId: string,
     dto: ResetPasswordDto,
@@ -166,7 +192,9 @@ export class AdminUsersService {
 
   private async applyChange(
     accountId: string,
-    patch: Partial<Pick<UserAccount, 'role' | 'status' | 'passwordHash' | 'mustChangePassword'>>,
+    patch: Partial<
+      Pick<UserAccount, 'role' | 'status' | 'passwordHash' | 'mustChangePassword' | 'permissions'>
+    >,
     actor: AuthenticatedUser,
   ): Promise<UserAccount> {
     const [row] = await this.db

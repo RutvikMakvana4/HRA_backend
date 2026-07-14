@@ -89,6 +89,9 @@ export class AuthController {
       id: actor.id,
       accountId: actor.uid,
       roles: actor.roles,
+      // From the token, like `roles` — and that is correct, not a shortcut: changing an account's
+      // permissions revokes its sessions, so a live token's claim can never be stale.
+      permissions: actor.permissions,
       mustChangePassword: await this.auth.passwordChangeRequired(actor.uid),
       profile,
     };

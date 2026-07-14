@@ -22,6 +22,7 @@ import {
   CreateUserAccountDto,
   ListAuditLogsDto,
   ResetPasswordDto,
+  SetPermissionsDto,
   SetRoleDto,
   SetStatusDto,
 } from './dto/admin-users.dto';
@@ -64,6 +65,16 @@ export class AdminUsersController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.users.setRole(id, dto, actor);
+  }
+
+  @Patch('users/:id/permissions')
+  @Roles([Role.SUPER_ADMIN])
+  setPermissions(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetPermissionsDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.users.setPermissions(id, dto, actor);
   }
 
   @Patch('users/:id/status')
