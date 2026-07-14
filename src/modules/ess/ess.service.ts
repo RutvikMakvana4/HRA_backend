@@ -13,7 +13,7 @@ import {
 import { DRIZZLE } from '../../common/constants';
 import { AppError, ErrorCode } from '../../common/errors/app-error';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
-import { isAdminOrAbove, topRole } from '../auth/roles';
+import { isSuperAdmin, topRole } from '../auth/roles';
 import { EmployeesService } from '../employees/employees.service';
 import { LeaveService } from '../leave/leave.service';
 
@@ -118,9 +118,9 @@ export class EssService {
 
   // ── Audit log ──────────────────────────────────────────────────────────────
 
-  /** `GET /audit-log` → HR/Admin only. Shaped to the frontend's audit table columns. */
+  /** `GET /audit-log` → super_admin only. Shaped to the frontend's audit table columns. */
   async auditLog(actor: AuthenticatedUser) {
-    if (!isAdminOrAbove(actor)) {
+    if (!isSuperAdmin(actor)) {
       throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to view the audit log', HttpStatus.FORBIDDEN);
     }
     const rows = await this.db

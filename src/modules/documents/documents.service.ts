@@ -1,12 +1,12 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { and, desc, eq, isNull } from 'drizzle-orm';
 import type { Database } from '../../db/client';
-import { documents, type Document } from '../../db/schema';
+import { candidates, documents, type Document } from '../../db/schema';
 import { DRIZZLE } from '../../common/constants';
 import { AppError, ErrorCode } from '../../common/errors/app-error';
 import { AUDIT_SERVICE, type AuditService } from '../../common/audit/audit.interface';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
-import { isAdminOrAbove } from '../auth/roles';
+import { isAdminOrAbove, isManagerOrAbove } from '../auth/roles';
 import { EmployeesService } from '../employees/employees.service';
 import { StorageService } from '../storage/storage.service';
 import type { CreateDocumentDto } from './dto/document.dto';
@@ -74,6 +74,53 @@ export class DocumentsService {
     return { document: row, upload: { url, expiresIn: 300 } };
   }
 
+  /** Register a candidate-owned document (resume) + signed upload URL. Recruiter/admin or the referrer. */
+  async createForCandidate(
+    candidateId: string,
+    dto: CreateDocumentDto,
+    actor: AuthenticatedUser,
+  ): Promise<CreatedDocument> {
+    const [candidate] = await this.db
+      .select({ id: candidates.id, referredBy: candidates.referredByEmployeeId })
+      .from(candidates)
+      .where(eq(candidates.id, candidateId))
+      .limit(1);
+    if (!candidate) throw new AppError(ErrorCode.NOT_FOUND, 'Candidate not found', HttpStatus.NOT_FOUND);
+    if (!isManagerOrAbove(actor) && candidate.referredBy !== actor.id) {
+      throw new AppError(
+        ErrorCode.FORBIDDEN,
+        'Only recruiters or the referring employee can upload this resume',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+
+    const fileKey = this.storage.buildDocumentKey(candidateId, dto.filename);
+    const [row] = await this.db
+      .insert(documents)
+      .values({
+        candidateId,
+        type: dto.type,
+        title: dto.title,
+        fileKey,
+        mimeType: dto.mimeType,
+        sizeBytes: dto.sizeBytes,
+        visibility: 'hr_only',
+        uploadedBy: actor.id,
+      })
+      .returning();
+    if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to create document');
+
+    const url = await this.storage.presignUpload(fileKey, dto.mimeType);
+    await this.audit.record({
+      actorType: actor.type,
+      actorId: actor.id,
+      action: 'document.create',
+      target: `document:${row.id}`,
+      after: { id: row.id, candidateId, type: row.type },
+    });
+    return { document: row, upload: { url, expiresIn: 300 } };
+  }
+
   /** Documents for an employee, visibility-scoped by the caller's role/relationship. */
   async listForEmployee(employeeId: string, actor: AuthenticatedUser): Promise<Document[]> {
     await this.assertCanAccessEmployeeDocs(employeeId, actor);
@@ -94,9 +141,31 @@ export class DocumentsService {
     actor: AuthenticatedUser,
   ): Promise<{ url: string; expiresIn: number }> {
     const doc = await this.getActiveOrThrow(documentId);
+
+    if (doc.candidateId) {
+      const hr = isManagerOrAbove(actor);
+      if (!hr) {
+        const [cand] = await this.db
+          .select({ referredBy: candidates.referredByEmployeeId })
+          .from(candidates)
+          .where(eq(candidates.id, doc.candidateId))
+          .limit(1);
+        if (!cand || cand.referredBy !== actor.id) {
+          throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to access this document', HttpStatus.FORBIDDEN);
+        }
+      }
+      await this.audit.record({
+        actorType: actor.type,
+        actorId: actor.id,
+        action: 'document.download',
+        target: `document:${doc.id}`,
+      });
+      return this.storage.presignDownload(doc.fileKey, doc.title);
+    }
+
     const hr = isAdminOrAbove(actor);
     if (!hr) {
-      if (doc.visibility !== 'employee_visible') {
+      if (doc.visibility !== 'employee_visible' || !doc.employeeId) {
         throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to access this document', HttpStatus.FORBIDDEN);
       }
       await this.assertCanAccessEmployeeDocs(doc.employeeId, actor);

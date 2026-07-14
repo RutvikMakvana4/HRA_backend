@@ -10,6 +10,7 @@
 import {
   type AnyPgColumn,
   bigint,
+  check,
   date,
   index,
   jsonb,
@@ -18,7 +19,9 @@ import {
   timestamp,
   uuid,
 } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
 import { citext, timestamps, uuidPk } from './_conventions';
+import { candidates } from './recruitment';
 import {
   documentType,
   documentVisibility,
@@ -107,16 +110,18 @@ export const employees = pgTable(
 );
 
 /**
- * Document — an S3-backed file attached to an employee. `fileKey` is the object key; the bytes are
+ * Document — an S3-backed file attached to an employee OR a candidate (at most one owner,
+ * enforced by the `documents_one_owner` check). `fileKey` is the object key; the bytes are
  * NEVER public and are exchanged only via short-lived signed URLs. Deletion is soft (`deletedAt`).
  */
 export const documents = pgTable(
   'documents',
   {
     id: uuidPk(),
-    employeeId: uuid('employee_id')
-      .notNull()
-      .references(() => employees.id, { onDelete: 'cascade' }),
+    employeeId: uuid('employee_id').references(() => employees.id, { onDelete: 'cascade' }),
+    candidateId: uuid('candidate_id').references((): AnyPgColumn => candidates.id, {
+      onDelete: 'set null',
+    }),
     type: documentType('type').notNull(),
     title: text('title').notNull(),
     fileKey: text('file_key').notNull(),
@@ -130,7 +135,12 @@ export const documents = pgTable(
   },
   (t) => ({
     employeeIdx: index('ix_documents_employee').on(t.employeeId),
+    candidateIdx: index('ix_documents_candidate').on(t.candidateId),
     typeIdx: index('ix_documents_type').on(t.type),
+    oneOwner: check(
+      'documents_one_owner',
+      sql`not (${t.employeeId} is not null and ${t.candidateId} is not null)`,
+    ),
   }),
 );
 

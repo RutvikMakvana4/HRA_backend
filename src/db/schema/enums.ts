@@ -173,3 +173,101 @@ export const timesheetStatus = pgEnum('timesheet_status', [
   'approved',
   'rejected',
 ]);
+
+// ── Module 8: Performance & Reviews (PRD §3) ─────────────────────────────────
+
+/** Cadence of a review cycle. */
+export const reviewCycleType = pgEnum('review_cycle_type', ['quarterly', 'half_yearly', 'annual']);
+
+/** Review-cycle lifecycle. `active` generates the per-participant review rows; `closed` is terminal. */
+export const reviewCycleStatus = pgEnum('review_cycle_status', ['draft', 'active', 'closed']);
+
+/** Goal flavour. `objective`/`key_result` model one level of OKR nesting; `personal` is standalone. */
+export const goalCategory = pgEnum('goal_category', [
+  'objective',
+  'key_result',
+  'personal',
+  'okr',
+]);
+
+/** Goal progress state. */
+export const goalStatus = pgEnum('goal_status', [
+  'not_started',
+  'on_track',
+  'at_risk',
+  'completed',
+  'dropped',
+]);
+
+/** Perspective a review is written from. */
+export const reviewType = pgEnum('review_type', ['self', 'manager', 'peer']);
+
+/** Review lifecycle — immutable once `submitted`. */
+export const reviewStatus = pgEnum('review_status', ['pending', 'submitted']);
+
+/** Nature of continuous feedback. */
+export const feedbackType = pgEnum('feedback_type', ['praise', 'constructive']);
+
+/** Who may see a feedback note. `manager_visible` also surfaces to the recipient's manager. */
+export const feedbackVisibility = pgEnum('feedback_visibility', ['private', 'manager_visible']);
+
+// ── Module 9: Recruitment / ATS (PRD §4) ─────────────────────────────────────
+
+/** Job-opening lifecycle. `filled` is set automatically once headcount is met. */
+export const jobOpeningStatus = pgEnum('job_opening_status', [
+  'open',
+  'on_hold',
+  'closed',
+  'filled',
+]);
+
+/** How a candidate entered the pipeline (feeds source-effectiveness analytics). */
+export const candidateSource = pgEnum('candidate_source', [
+  'referral',
+  'inbound',
+  'outbound',
+  'agency',
+  'other',
+]);
+
+/** Application lifecycle. `hired` is the integration trigger (creates Employee + onboarding case). */
+export const applicationStatus = pgEnum('application_status', [
+  'active',
+  'rejected',
+  'withdrawn',
+  'hired',
+]);
+
+/** Interview round flavour. */
+export const interviewType = pgEnum('interview_type', ['screen', 'technical', 'cultural', 'final']);
+
+/** Where an interview happens. */
+export const interviewMode = pgEnum('interview_mode', ['onsite', 'remote']);
+
+/** Interview lifecycle. */
+export const interviewStatus = pgEnum('interview_status', ['scheduled', 'completed', 'cancelled']);
+
+/** Interviewer's hire recommendation on a scorecard. */
+export const scorecardRecommendation = pgEnum('scorecard_recommendation', [
+  'strong_hire',
+  'hire',
+  'no_hire',
+  'strong_no_hire',
+]);
+
+/** Offer lifecycle. `accepted` gates the hire → Employee conversion. */
+export const offerStatus = pgEnum('offer_status', ['draft', 'sent', 'accepted', 'declined']);
+
+// ── Module 10: Asset Management (PRD §5) ─────────────────────────────────────
+
+/** Nature of an asset category — hardware is single-custody, a software license is seat-based. */
+export const assetCategoryType = pgEnum('asset_category_type', ['hardware', 'software_license']);
+
+/** Asset lifecycle. `assigned` is set while an asset is in someone's custody; `retired`/`lost` are terminal. */
+export const assetStatus = pgEnum('asset_status', [
+  'available',
+  'assigned',
+  'in_repair',
+  'retired',
+  'lost',
+]);

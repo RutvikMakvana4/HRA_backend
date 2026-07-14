@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { EmployeesModule } from '../employees/employees.module';
+import { CandidateDocumentsController } from './candidate-documents.controller';
 import { DocumentsController } from './documents.controller';
 import { EmployeeDocumentsController } from './employee-documents.controller';
 import { DocumentsService } from './documents.service';
@@ -10,7 +11,7 @@ import { DocumentsService } from './documents.service';
  */
 @Module({
   imports: [EmployeesModule],
-  controllers: [EmployeeDocumentsController, DocumentsController],
+  controllers: [EmployeeDocumentsController, CandidateDocumentsController, DocumentsController],
   providers: [DocumentsService],
 })
 export class DocumentsModule {}
