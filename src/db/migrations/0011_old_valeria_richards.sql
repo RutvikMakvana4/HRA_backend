@@ -1,0 +1,1 @@
+ALTER TABLE "user_accounts" ADD COLUMN "permissions" text[] DEFAULT '{}' NOT NULL;

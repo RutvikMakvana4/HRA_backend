@@ -23,6 +23,12 @@ export const userAccounts = pgTable(
     role: userRole('role').notNull().default('employee'),
     passwordHash: text('password_hash').notNull(),
     status: accountStatus('status').notNull().default('active'),
+    /**
+     * Capability codes granted to this account, independent of its role — see
+     * `src/modules/auth/permissions.ts`. Carried in the access token, so a change here revokes
+     * the account's sessions (AdminUsersService.setPermissions) rather than waiting for a refresh.
+     */
+    permissions: text('permissions').array().notNull().default([]),
     /** True while the password is an HR-issued temporary one — forces a change on first login. */
     mustChangePassword: boolean('must_change_password').notNull().default(false),
     lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
