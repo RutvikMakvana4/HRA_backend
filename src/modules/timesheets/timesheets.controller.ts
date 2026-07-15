@@ -28,6 +28,7 @@ import {
   DecideWeekDto,
   GetWeekDto,
   ListProjectsDto,
+  ListWeeksDto,
   UpdateClientDto,
   UpdateEntryDto,
   UpdateProjectDto,
@@ -129,6 +130,11 @@ export class AllocationsController {
 @Controller('timesheets')
 export class TimesheetsController {
   constructor(private readonly timesheets: TimesheetsService) {}
+
+  @Get('weeks')
+  listWeeks(@Query() query: ListWeeksDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.timesheets.listWeeks(query, actor);
+  }
 
   @Get('week')
   getWeek(@Query() query: GetWeekDto, @CurrentUser() actor: AuthenticatedUser) {

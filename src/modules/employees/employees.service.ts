@@ -224,6 +224,29 @@ export class EmployeesService {
     return row;
   }
 
+  /**
+   * The employee-id set a scoped read may return, decided by ROLE — the IDOR guard.
+   * me   → the caller only.
+   * team → the caller's direct reports only (empty for a plain employee).
+   * all  → every employee, but only for admin+ (else 403).
+   * The `scope` query param never grants access; this re-derives the set from the role.
+   */
+  async scopeEmployeeIds(scope: 'me' | 'team' | 'all', actor: AuthenticatedUser): Promise<string[]> {
+    if (scope === 'me') return [actor.id];
+    if (scope === 'all') {
+      if (!isAdminOrAbove(actor)) {
+        throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to view org-wide records', HttpStatus.FORBIDDEN);
+      }
+      const rows = await this.db.select({ id: employees.id }).from(employees);
+      return rows.map((r) => r.id);
+    }
+    const rows = await this.db
+      .select({ id: employees.id })
+      .from(employees)
+      .where(eq(employees.managerId, actor.id));
+    return rows.map((r) => r.id);
+  }
+
   /** Build the org tree from `manager_id` relationships. Roots are employees with no manager. */
   async orgChart(): Promise<OrgChartNode[]> {
     const rows = await this.db

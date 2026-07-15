@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import type { Database } from '../../db/client';
 import {
   employees,
@@ -20,6 +20,7 @@ import { EmployeesService } from '../employees/employees.service';
 import { ProjectsService } from './projects.service';
 import type {
   GetWeekDto,
+  ListWeeksDto,
   UpdateEntryDto,
   UpsertEntryDto,
   UtilizationReportDto,
@@ -238,7 +239,7 @@ export class TimesheetsService {
 
   /** billable approved hours ÷ available capacity over [from, to], per employee. Computed on read. */
   async utilizationReport(query: UtilizationReportDto, actor: AuthenticatedUser) {
-    const employeeIds = await this.reportScopeEmployeeIds(query.scope, actor);
+    const employeeIds = await this.employeesService.scopeEmployeeIds(query.scope, actor);
     if (employeeIds.length === 0) return { from: query.from, to: query.to, capacityHours: this.toHours(this.capacityMinutes(query.from, query.to)), employees: [] };
 
     const rows = await this.db
@@ -276,6 +277,59 @@ export class TimesheetsService {
         utilizationPct: capacityMinutes > 0 ? Math.round((r.billableMinutes / capacityMinutes) * 100) : 0,
       })),
     };
+  }
+
+  /** Weeks for the scoped employee set, newest first, with billable_hours per week. */
+  async listWeeks(query: ListWeeksDto, actor: AuthenticatedUser) {
+    const employeeIds = await this.employeesService.scopeEmployeeIds(query.scope, actor);
+    if (employeeIds.length === 0) return [];
+
+    const rows = await this.db
+      .select({
+        id: timesheetWeeks.id,
+        employeeId: timesheetWeeks.employeeId,
+        employeeName: this.nameExpr(),
+        weekStartDate: timesheetWeeks.weekStartDate,
+        status: timesheetWeeks.status,
+        totalMinutes: timesheetWeeks.totalMinutes,
+        submittedAt: timesheetWeeks.submittedAt,
+        approverId: timesheetWeeks.approverId,
+        decidedAt: timesheetWeeks.decidedAt,
+        decisionNote: timesheetWeeks.decisionNote,
+      })
+      .from(timesheetWeeks)
+      .innerJoin(employees, eq(employees.id, timesheetWeeks.employeeId))
+      .where(inArray(timesheetWeeks.employeeId, employeeIds))
+      .orderBy(desc(timesheetWeeks.weekStartDate));
+
+    // Billable minutes per week — a grouped aggregate over the week ids, merged in JS.
+    const weekIds = rows.map((r) => r.id);
+    const billable =
+      weekIds.length === 0
+        ? []
+        : await this.db
+            .select({
+              weekId: timesheetEntries.weekId,
+              billableMinutes: sql<number>`cast(coalesce(sum(case when ${timesheetEntries.billable} then ${timesheetEntries.minutes} else 0 end), 0) as int)`,
+            })
+            .from(timesheetEntries)
+            .where(inArray(timesheetEntries.weekId, weekIds))
+            .groupBy(timesheetEntries.weekId);
+    const billableByWeek = new Map(billable.map((b) => [b.weekId, b.billableMinutes]));
+
+    return rows.map((r) => ({
+      id: r.id,
+      employeeId: r.employeeId,
+      employeeName: r.employeeName,
+      weekStartDate: r.weekStartDate,
+      status: r.status,
+      totalHours: this.toHours(r.totalMinutes),
+      billableHours: this.toHours(billableByWeek.get(r.id) ?? 0),
+      submittedAt: r.submittedAt,
+      approverId: r.approverId,
+      decidedAt: r.decidedAt,
+      decisionNote: r.decisionNote,
+    }));
   }
 
   // ── internals ────────────────────────────────────────────────────────────────
@@ -418,23 +472,6 @@ export class TimesheetsService {
       .limit(1);
     if (leave) return 'leave';
     return null;
-  }
-
-  private async reportScopeEmployeeIds(scope: 'me' | 'team' | 'all', actor: AuthenticatedUser): Promise<string[]> {
-    if (scope === 'me') return [actor.id];
-    if (scope === 'all') {
-      if (!isAdminOrAbove(actor)) {
-        throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to view org-wide utilization', HttpStatus.FORBIDDEN);
-      }
-      const rows = await this.db.select({ id: employees.id }).from(employees);
-      return rows.map((r) => r.id);
-    }
-    // team — direct reports of the caller.
-    const rows = await this.db
-      .select({ id: employees.id })
-      .from(employees)
-      .where(eq(employees.managerId, actor.id));
-    return rows.map((r) => r.id);
   }
 
   /** Working-day capacity in minutes over [from,to] inclusive (weekdays × standard day). */

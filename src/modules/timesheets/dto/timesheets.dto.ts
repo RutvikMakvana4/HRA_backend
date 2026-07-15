@@ -114,6 +114,10 @@ export const decideWeekSchema = z.object({
 
 // ── Reports ──────────────────────────────────────────────────────────────────
 
+export const listWeeksSchema = z.object({
+  scope: z.enum(['me', 'team', 'all']).default('me'),
+});
+
 export const utilizationReportSchema = z
   .object({
     from: dateOnly,
@@ -136,5 +140,6 @@ export class GetWeekDto extends createZodDto(getWeekSchema) {}
 export class UpsertEntryDto extends createZodDto(upsertEntrySchema) {}
 export class UpdateEntryDto extends createZodDto(updateEntrySchema) {}
 export class DecideWeekDto extends createZodDto(decideWeekSchema) {}
+export class ListWeeksDto extends createZodDto(listWeeksSchema) {}
 export class UtilizationReportDto extends createZodDto(utilizationReportSchema) {}
 export class AllocationReportDto extends createZodDto(allocationReportSchema) {}
