@@ -11,7 +11,7 @@ import {
   type ProjectAllocation,
 } from '../../db/schema';
 import { DRIZZLE } from '../../common/constants';
-import { AppError, ErrorCode } from '../../common/errors/app-error';
+import { AppError, ErrorCode, pgErrorCode } from '../../common/errors/app-error';
 import { AUDIT_SERVICE, type AuditService } from '../../common/audit/audit.interface';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { isAdminOrAbove } from '../auth/roles';
@@ -68,7 +68,8 @@ export class ProjectsService {
     if (query.status) filters.push(eq(projects.status, query.status));
     if (query.clientId) filters.push(eq(projects.clientId, query.clientId));
     if (query.type) filters.push(eq(projects.type, query.type));
-    return this.db
+
+    const rows = await this.db
       .select({
         id: projects.id,
         clientId: projects.clientId,
@@ -89,6 +90,19 @@ export class ProjectsService {
       .leftJoin(employees, eq(employees.id, projects.pmEmployeeId))
       .where(filters.length ? and(...filters) : undefined)
       .orderBy(asc(projects.name));
+
+    // Active-allocation counts, grouped — a flat aggregate, NOT a correlated subquery.
+    const counts = await this.db
+      .select({
+        projectId: projectAllocations.projectId,
+        count: sql<number>`cast(count(*) as int)`,
+      })
+      .from(projectAllocations)
+      .where(eq(projectAllocations.isActive, true))
+      .groupBy(projectAllocations.projectId);
+    const countByProject = new Map(counts.map((c) => [c.projectId, c.count]));
+
+    return rows.map((r) => ({ ...r, allocationCount: countByProject.get(r.id) ?? 0 }));
   }
 
   async createProject(dto: CreateProjectDto, actor: AuthenticatedUser): Promise<Project> {
@@ -327,7 +341,7 @@ export class ProjectsService {
     try {
       return await work();
     } catch (err) {
-      if (typeof err === 'object' && err !== null && 'code' in err && err.code === '23505') {
+      if (pgErrorCode(err) === '23505') {
         throw new AppError(ErrorCode.CONFLICT, 'A record with that code already exists', HttpStatus.CONFLICT);
       }
       throw err;
