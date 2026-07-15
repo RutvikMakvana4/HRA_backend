@@ -21,6 +21,7 @@ import { ProjectsService } from './projects.service';
 import type {
   GetWeekDto,
   ListWeeksDto,
+  SaveWeekDto,
   UpdateEntryDto,
   UpsertEntryDto,
   UtilizationReportDto,
@@ -123,6 +124,70 @@ export class TimesheetsService {
 
     const warnings = await this.entryWarnings(actor.id, week.id, dto.workDate, dto.projectId);
     return { ...row, hours: this.toHours(row.minutes), warnings };
+  }
+
+  /** Replace the caller's whole week with the supplied cells, in one transaction. Owner-only by construction. */
+  async saveWeek(dto: SaveWeekDto, actor: AuthenticatedUser) {
+    const weekStart = this.mondayOf(dto.weekStart);
+    const week = await this.ensureDraftWeek(actor.id, weekStart);
+    this.assertDraft(week);
+
+    const cells = dto.cells.filter((c) => c.hours > 0);
+    // Resolve each distinct project's default billable once.
+    const projectIds = [...new Set(cells.map((c) => c.projectId))];
+    const defaults = new Map<string, boolean>();
+    for (const pid of projectIds) {
+      const p = await this.projectsService.getProjectRow(pid); // 404s an unknown project
+      defaults.set(pid, p.defaultBillable);
+    }
+
+    await this.db.transaction(async (tx) => {
+      await tx.delete(timesheetEntries).where(eq(timesheetEntries.weekId, week.id));
+      if (cells.length) {
+        await tx.insert(timesheetEntries).values(
+          cells.map((c) => ({
+            weekId: week.id,
+            employeeId: actor.id,
+            projectId: c.projectId,
+            workDate: c.workDate,
+            minutes: Math.round(c.hours * 60),
+            billable: c.billable ?? defaults.get(c.projectId) ?? true,
+            taskDescription: c.taskDescription ?? null,
+            status: 'draft' as const,
+          })),
+        );
+      }
+    });
+
+    await this.recomputeWeekTotal(week.id);
+    await this.record(actor, 'timesheet_week.save', `timesheet_week:${week.id}`, {
+      after: { cellCount: cells.length },
+    });
+
+    return this.weekPayload(actor.id, weekStart, week.id);
+  }
+
+  /** The getWeek-shaped payload plus week-level warnings — shared by saveWeek. */
+  private async weekPayload(employeeId: string, weekStart: string, weekId: string) {
+    const fresh = await this.getWeekRow(weekId);
+    const entries = await this.entriesForWeek(weekId);
+    const nonWorkingDays = await this.nonWorkingDays(employeeId, weekStart);
+
+    const warnings: string[] = [];
+    const byDay = new Map<string, number>();
+    for (const e of entries) byDay.set(e.workDate, (byDay.get(e.workDate) ?? 0) + e.minutes);
+    for (const [day, minutes] of byDay) {
+      if (minutes > MAX_DAILY_MINUTES) warnings.push(`Logged more than ${MAX_DAILY_MINUTES / 60}h on ${day}`);
+      const reason = await this.nonWorkingReason(employeeId, day);
+      if (reason) warnings.push(`${day} is a ${reason}`);
+    }
+
+    return {
+      week: { ...fresh, totalHours: this.toHours(fresh.totalMinutes) },
+      entries,
+      nonWorkingDays,
+      warnings,
+    };
   }
 
   async updateEntry(id: string, dto: UpdateEntryDto, actor: AuthenticatedUser) {

@@ -29,6 +29,7 @@ import {
   GetWeekDto,
   ListProjectsDto,
   ListWeeksDto,
+  SaveWeekDto,
   UpdateClientDto,
   UpdateEntryDto,
   UpdateProjectDto,
@@ -144,6 +145,12 @@ export class TimesheetsController {
   @Post('entries')
   upsertEntry(@Body() dto: UpsertEntryDto, @CurrentUser() actor: AuthenticatedUser) {
     return this.timesheets.upsertEntry(dto, actor);
+  }
+
+  @Post('week')
+  @HttpCode(HttpStatus.OK)
+  saveWeek(@Body() dto: SaveWeekDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.timesheets.saveWeek(dto, actor);
   }
 
   @Patch('entries/:id')

@@ -112,6 +112,21 @@ export const decideWeekSchema = z.object({
   note: z.string().trim().max(500).optional(),
 });
 
+/** hours is decimal (e.g. 1.5); stored as integer minutes. billable defaults from the project. */
+export const saveWeekCellSchema = z.object({
+  projectId: z.uuid(),
+  workDate: dateOnly,
+  hours: z.number().min(0).max(24),
+  billable: z.boolean().optional(),
+  taskDescription: z.string().trim().max(500).nullable().optional(),
+});
+
+/** Replace a whole week's entries in one call — the frontend grid saves this shape. */
+export const saveWeekSchema = z.object({
+  weekStart: dateOnly,
+  cells: z.array(saveWeekCellSchema),
+});
+
 // ── Reports ──────────────────────────────────────────────────────────────────
 
 export const listWeeksSchema = z.object({
@@ -140,6 +155,7 @@ export class GetWeekDto extends createZodDto(getWeekSchema) {}
 export class UpsertEntryDto extends createZodDto(upsertEntrySchema) {}
 export class UpdateEntryDto extends createZodDto(updateEntrySchema) {}
 export class DecideWeekDto extends createZodDto(decideWeekSchema) {}
+export class SaveWeekDto extends createZodDto(saveWeekSchema) {}
 export class ListWeeksDto extends createZodDto(listWeeksSchema) {}
 export class UtilizationReportDto extends createZodDto(utilizationReportSchema) {}
 export class AllocationReportDto extends createZodDto(allocationReportSchema) {}
