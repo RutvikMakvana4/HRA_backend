@@ -167,7 +167,7 @@ export class ProjectsService {
       })
       .from(projectAllocations)
       .innerJoin(employees, eq(employees.id, projectAllocations.employeeId))
-      .where(eq(projectAllocations.projectId, projectId))
+      .where(and(eq(projectAllocations.projectId, projectId), eq(projectAllocations.isActive, true)))
       .orderBy(asc(projectAllocations.isActive));
   }
 
