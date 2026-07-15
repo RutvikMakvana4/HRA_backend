@@ -143,6 +143,11 @@ export const utilizationReportSchema = z
 
 export const allocationReportSchema = z.object({
   date: dateOnly.optional(),
+  scope: z.enum(['me', 'team', 'all']).default('me'),
+});
+
+export const listAllocationsSchema = z.object({
+  scope: z.enum(['me', 'team', 'all']).default('me'),
 });
 
 export class CreateClientDto extends createZodDto(createClientSchema) {}
@@ -159,3 +164,4 @@ export class SaveWeekDto extends createZodDto(saveWeekSchema) {}
 export class ListWeeksDto extends createZodDto(listWeeksSchema) {}
 export class UtilizationReportDto extends createZodDto(utilizationReportSchema) {}
 export class AllocationReportDto extends createZodDto(allocationReportSchema) {}
+export class ListAllocationsDto extends createZodDto(listAllocationsSchema) {}

@@ -27,6 +27,7 @@ import {
   CreateProjectDto,
   DecideWeekDto,
   GetWeekDto,
+  ListAllocationsDto,
   ListProjectsDto,
   ListWeeksDto,
   SaveWeekDto,
@@ -117,6 +118,11 @@ export class ProjectsController {
 @Controller('allocations')
 export class AllocationsController {
   constructor(private readonly projects: ProjectsService) {}
+
+  @Get()
+  listMine(@Query() query: ListAllocationsDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.projects.listMyAllocations(query, actor);
+  }
 
   @Delete(':id')
   @HttpCode(HttpStatus.OK)

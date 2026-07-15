@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { and, asc, eq, sql, type SQL } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql, type SQL } from 'drizzle-orm';
 import type { Database } from '../../db/client';
 import {
   clients,
@@ -21,6 +21,7 @@ import type {
   CreateAllocationDto,
   CreateClientDto,
   CreateProjectDto,
+  ListAllocationsDto,
   ListProjectsDto,
   UpdateClientDto,
   UpdateProjectDto,
@@ -218,13 +219,36 @@ export class ProjectsService {
     return { id: row.id, isActive: row.isActive, endDate: row.endDate };
   }
 
+  /** The scoped employees' active allocations, with project_name. Default scope = the caller. */
+  async listMyAllocations(query: ListAllocationsDto, actor: AuthenticatedUser) {
+    const employeeIds = await this.employeesService.scopeEmployeeIds(query.scope, actor);
+    if (employeeIds.length === 0) return [];
+    return this.db
+      .select({
+        id: projectAllocations.id,
+        projectId: projectAllocations.projectId,
+        projectName: projects.name,
+        employeeId: projectAllocations.employeeId,
+        employeeName: this.nameExpr(),
+        roleOnProject: projectAllocations.roleOnProject,
+        allocationPct: projectAllocations.allocationPct,
+        startDate: projectAllocations.startDate,
+        endDate: projectAllocations.endDate,
+        isActive: projectAllocations.isActive,
+      })
+      .from(projectAllocations)
+      .innerJoin(projects, eq(projects.id, projectAllocations.projectId))
+      .innerJoin(employees, eq(employees.id, projectAllocations.employeeId))
+      .where(and(inArray(projectAllocations.employeeId, employeeIds), eq(projectAllocations.isActive, true)))
+      .orderBy(asc(projects.name));
+  }
+
   // ── Allocation report ────────────────────────────────────────────────────────
 
   /** Who is on what, with per-employee total % and an over-allocated flag. HR/Delivery view. */
   async allocationReport(query: AllocationReportDto, actor: AuthenticatedUser) {
-    if (!isAdminOrAbove(actor)) {
-      throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to view the allocation report', HttpStatus.FORBIDDEN);
-    }
+    const employeeIds = await this.employeesService.scopeEmployeeIds(query.scope, actor);
+    if (employeeIds.length === 0) return { date: query.date ?? new Date().toISOString().slice(0, 10), employees: [] };
     const onDate = query.date ?? new Date().toISOString().slice(0, 10);
 
     const rows = await this.db
@@ -241,6 +265,7 @@ export class ProjectsService {
       .innerJoin(projects, eq(projects.id, projectAllocations.projectId))
       .where(
         and(
+          inArray(projectAllocations.employeeId, employeeIds),
           eq(projectAllocations.isActive, true),
           sql`(${projectAllocations.startDate} is null or ${projectAllocations.startDate} <= ${onDate})`,
           sql`(${projectAllocations.endDate} is null or ${projectAllocations.endDate} >= ${onDate})`,
