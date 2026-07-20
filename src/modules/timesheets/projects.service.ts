@@ -495,12 +495,15 @@ export class ProjectsService {
       }
     }
 
-    // 2. Title / description — PM/admin, or the person who created the task.
+    // 2. Title / description — PM/admin, or the creator while nobody else has picked it up.
     if (touches('title') || touches('description')) {
-      if (!canManage && task.createdBy !== actor.id) {
+      const ownUnclaimed =
+        task.createdBy === actor.id &&
+        (task.assigneeEmployeeId === null || task.assigneeEmployeeId === actor.id);
+      if (!canManage && !ownUnclaimed) {
         throw new AppError(
           ErrorCode.FORBIDDEN,
-          'Only the PM or the person who created this task can edit it',
+          'You can only edit a task you created that nobody else has picked up',
           HttpStatus.FORBIDDEN,
         );
       }
