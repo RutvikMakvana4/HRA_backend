@@ -3,10 +3,15 @@
  * billable vs non-billable effort, and capacity/utilization.
  *
  *  - `clients`           — external clients (internal projects have none).
- *  - `projects`          — client or internal projects, each with a PM and a billable default.
+ *  - `projects`          — client or internal projects, each with a PM, a billable default, and a
+ *                          manually-set RAG health / progress %.
  *  - `projectAllocations`— who is on a project, at what planned capacity %, in what role.
+ *  - `projectMilestones` — delivery points on a project.
+ *  - `projectTasks`      — work items on a project, optionally under a milestone.
  *  - `timesheetWeeks`    — the weekly submit/approve unit per employee (Monday-anchored).
- *  - `timesheetEntries`  — per-day, per-project effort rows rolling up under a week.
+ *  - `timesheetEntries`  — per-day, per-project effort rows rolling up under a week, optionally
+ *                          attributed to a task.
+ *  - `updateComments`    — comments on a timesheet entry (the daily update).
  *
  * Hours are stored decimal-free as INTEGER MINUTES (project convention — see attendance), exposed as
  * decimal `hours` at the API boundary.
@@ -14,7 +19,16 @@
 import { boolean, date, index, integer, pgTable, text, timestamp, unique, uuid } from 'drizzle-orm/pg-core';
 import { timestamps, uuidPk } from './_conventions';
 import { employees } from './employees';
-import { clientStatus, projectStatus, projectType, timesheetStatus } from './enums';
+import {
+  clientStatus,
+  milestoneStatus,
+  projectHealth,
+  projectStatus,
+  projectType,
+  taskPriority,
+  taskStatus,
+  timesheetStatus,
+} from './enums';
 
 export const clients = pgTable(
   'clients',
@@ -45,6 +59,15 @@ export const projects = pgTable(
     startDate: date('start_date'),
     endDate: date('end_date'),
     pmEmployeeId: uuid('pm_employee_id').references(() => employees.id, { onDelete: 'set null' }),
+    /** RAG status, set manually by the PM. */
+    health: projectHealth('health').notNull().default('on_track'),
+    /** 0-100, set manually by the PM — never derived. */
+    progressPct: integer('progress_pct').notNull().default(0),
+    /**
+     * When progress_pct or health last changed. A manual number goes stale silently and a
+     * stale number reads as truth, so every surface shows how old it is.
+     */
+    progressUpdatedAt: timestamp('progress_updated_at', { withTimezone: true }),
     ...timestamps,
   },
   (t) => ({
@@ -75,6 +98,90 @@ export const projectAllocations = pgTable(
   (t) => ({
     projectIdx: index('ix_project_allocations_project').on(t.projectId, t.isActive),
     employeeIdx: index('ix_project_allocations_employee').on(t.employeeId, t.isActive),
+  }),
+);
+
+/** Delivery points on a project. Billing is milestone-based, so these are real markers. */
+export const projectMilestones = pgTable(
+  'project_milestones',
+  {
+    id: uuidPk(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description'),
+    dueDate: date('due_date').notNull(),
+    status: milestoneStatus('status').notNull().default('pending'),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    sortOrder: integer('sort_order').notNull().default(0),
+    ...timestamps,
+  },
+  (t) => ({
+    projectIdx: index('ix_project_milestones_project').on(t.projectId),
+  }),
+);
+
+/**
+ * Work items on a project. Creation is open to any project member — a board only the PM
+ * can add to stops reflecting reality within a week.
+ *
+ * `assignedByEmployeeId` records HOW the work was picked up: equal to the assignee means
+ * self-assigned; anyone else means it was handed over. Both routes are legitimate.
+ */
+export const projectTasks = pgTable(
+  'project_tasks',
+  {
+    id: uuidPk(),
+    projectId: uuid('project_id')
+      .notNull()
+      .references(() => projects.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    description: text('description'),
+    assigneeEmployeeId: uuid('assignee_employee_id').references(() => employees.id, {
+      onDelete: 'set null',
+    }),
+    assignedByEmployeeId: uuid('assigned_by_employee_id').references(() => employees.id, {
+      onDelete: 'set null',
+    }),
+    assignedAt: timestamp('assigned_at', { withTimezone: true }),
+    status: taskStatus('status').notNull().default('todo'),
+    priority: taskPriority('priority').notNull().default('medium'),
+    dueDate: date('due_date'),
+    milestoneId: uuid('milestone_id').references(() => projectMilestones.id, {
+      onDelete: 'set null',
+    }),
+    createdBy: uuid('created_by')
+      .notNull()
+      .references(() => employees.id, { onDelete: 'restrict' }),
+    sortOrder: integer('sort_order').notNull().default(0),
+    ...timestamps,
+  },
+  (t) => ({
+    projectIdx: index('ix_project_tasks_project').on(t.projectId),
+    assigneeIdx: index('ix_project_tasks_assignee').on(t.assigneeEmployeeId),
+  }),
+);
+
+/**
+ * A comment on a daily update. The update IS the timesheet entry, so comments hang off
+ * the entry — there is no parallel "update" record to attach to.
+ */
+export const updateComments = pgTable(
+  'update_comments',
+  {
+    id: uuidPk(),
+    entryId: uuid('entry_id')
+      .notNull()
+      .references(() => timesheetEntries.id, { onDelete: 'cascade' }),
+    authorEmployeeId: uuid('author_employee_id')
+      .notNull()
+      .references(() => employees.id, { onDelete: 'cascade' }),
+    body: text('body').notNull(),
+    ...timestamps,
+  },
+  (t) => ({
+    entryIdx: index('ix_update_comments_entry').on(t.entryId),
   }),
 );
 
@@ -124,6 +231,12 @@ export const timesheetEntries = pgTable(
     billable: boolean('billable').notNull().default(true),
     taskDescription: text('task_description'),
     category: text('category'),
+    /**
+     * Optional task attribution. Deliberately NULLABLE: making it required would mean that on
+     * any day the task list is stale, people stop logging time at all — which would corrupt the
+     * timesheet data the rest of the platform depends on.
+     */
+    taskId: uuid('task_id').references(() => projectTasks.id, { onDelete: 'set null' }),
     status: timesheetStatus('status').notNull().default('draft'),
     ...timestamps,
   },
@@ -140,7 +253,13 @@ export type Project = typeof projects.$inferSelect;
 export type NewProject = typeof projects.$inferInsert;
 export type ProjectAllocation = typeof projectAllocations.$inferSelect;
 export type NewProjectAllocation = typeof projectAllocations.$inferInsert;
+export type ProjectMilestone = typeof projectMilestones.$inferSelect;
+export type NewProjectMilestone = typeof projectMilestones.$inferInsert;
+export type ProjectTask = typeof projectTasks.$inferSelect;
+export type NewProjectTask = typeof projectTasks.$inferInsert;
 export type TimesheetWeek = typeof timesheetWeeks.$inferSelect;
 export type NewTimesheetWeek = typeof timesheetWeeks.$inferInsert;
 export type TimesheetEntry = typeof timesheetEntries.$inferSelect;
 export type NewTimesheetEntry = typeof timesheetEntries.$inferInsert;
+export type UpdateComment = typeof updateComments.$inferSelect;
+export type NewUpdateComment = typeof updateComments.$inferInsert;

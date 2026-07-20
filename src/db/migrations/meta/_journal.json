@@ -85,6 +85,13 @@
       "when": 1784016613482,
       "tag": "0011_old_valeria_richards",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784530984439,
+      "tag": "0012_faulty_kitty_pryde",
+      "breakpoints": true
     }
   ]
 }

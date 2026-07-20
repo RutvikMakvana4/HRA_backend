@@ -174,6 +174,19 @@ export const timesheetStatus = pgEnum('timesheet_status', [
   'rejected',
 ]);
 
+// ── Module 7b: Project Management ────────────────────────────────────────────
+
+/** RAG health of a project, set manually by its PM. */
+export const projectHealth = pgEnum('project_health', ['on_track', 'at_risk', 'delayed']);
+
+/** A milestone is a delivery point — delivered or not. The due date carries "is it late". */
+export const milestoneStatus = pgEnum('milestone_status', ['pending', 'done']);
+
+/** `blocked` earns its place: without it people encode blockage in the title. */
+export const taskStatus = pgEnum('task_status', ['todo', 'in_progress', 'blocked', 'done']);
+
+export const taskPriority = pgEnum('task_priority', ['low', 'medium', 'high']);
+
 // ── Module 8: Performance & Reviews (PRD §3) ─────────────────────────────────
 
 /** Cadence of a review cycle. */
