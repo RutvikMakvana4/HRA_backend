@@ -314,6 +314,48 @@ export class ProjectsService {
     return Boolean(row && row.pm === actor.id);
   }
 
+  /**
+   * Project membership — the module's third access dimension, alongside role (isAdminOrAbove)
+   * and org chart (isManagerOf). An employee must be able to open a project they work on even
+   * though they manage nobody, and must not be able to open one they have nothing to do with.
+   *
+   * ONE copy, called by every project-scoped read. A duplicated membership test is exactly the
+   * IDOR the timesheets integration nearly shipped with its scope resolver.
+   */
+  async canViewProject(projectId: string, actor: AuthenticatedUser): Promise<boolean> {
+    if (isAdminOrAbove(actor)) return true;
+
+    const [project] = await this.db
+      .select({ pmEmployeeId: projects.pmEmployeeId })
+      .from(projects)
+      .where(eq(projects.id, projectId));
+    if (!project) return false;
+    if (project.pmEmployeeId === actor.id) return true;
+
+    const [allocation] = await this.db
+      .select({ id: projectAllocations.id })
+      .from(projectAllocations)
+      .where(
+        and(
+          eq(projectAllocations.projectId, projectId),
+          eq(projectAllocations.employeeId, actor.id),
+          eq(projectAllocations.isActive, true),
+        ),
+      )
+      .limit(1);
+    return Boolean(allocation);
+  }
+
+  async assertCanViewProject(projectId: string, actor: AuthenticatedUser): Promise<void> {
+    if (!(await this.canViewProject(projectId, actor))) {
+      throw new AppError(
+        ErrorCode.FORBIDDEN,
+        'Not allowed to view this project',
+        HttpStatus.FORBIDDEN,
+      );
+    }
+  }
+
   /** Sum of active allocation % for an employee across all projects. */
   async activeAllocationPct(employeeId: string): Promise<number> {
     const [row] = await this.db
