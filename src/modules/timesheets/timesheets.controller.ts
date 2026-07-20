@@ -24,6 +24,7 @@ import {
   AllocationReportDto,
   CreateAllocationDto,
   CreateClientDto,
+  CreateMilestoneDto,
   CreateProjectDto,
   DecideWeekDto,
   GetWeekDto,
@@ -33,6 +34,8 @@ import {
   SaveWeekDto,
   UpdateClientDto,
   UpdateEntryDto,
+  UpdateMilestoneDto,
+  UpdateProgressDto,
   UpdateProjectDto,
   UpsertEntryDto,
   UtilizationReportDto,
@@ -110,6 +113,29 @@ export class ProjectsController {
   ) {
     return this.projects.createAllocation(id, dto, actor);
   }
+
+  @Get(':id/milestones')
+  listMilestones(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.projects.listMilestones(id, actor);
+  }
+
+  @Post(':id/milestones')
+  createMilestone(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateMilestoneDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.projects.createMilestone(id, dto, actor);
+  }
+
+  @Patch(':id/progress')
+  updateProgress(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateProgressDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.projects.updateProgress(id, dto, actor);
+  }
 }
 
 @ApiTags('projects')
@@ -128,6 +154,29 @@ export class AllocationsController {
   @HttpCode(HttpStatus.OK)
   remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
     return this.projects.removeAllocation(id, actor);
+  }
+}
+
+@ApiTags('projects')
+@ApiBearerAuth('access-token')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Controller('milestones')
+export class MilestonesController {
+  constructor(private readonly projects: ProjectsService) {}
+
+  @Patch(':id')
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateMilestoneDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.projects.updateMilestone(id, dto, actor);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.projects.deleteMilestone(id, actor);
   }
 }
 

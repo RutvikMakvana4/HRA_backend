@@ -5,6 +5,7 @@ import {
   clients,
   employees,
   projectAllocations,
+  projectMilestones,
   projects,
   type Client,
   type Project,
@@ -20,10 +21,13 @@ import type {
   AllocationReportDto,
   CreateAllocationDto,
   CreateClientDto,
+  CreateMilestoneDto,
   CreateProjectDto,
   ListAllocationsDto,
   ListProjectsDto,
   UpdateClientDto,
+  UpdateMilestoneDto,
+  UpdateProgressDto,
   UpdateProjectDto,
 } from './dto/timesheets.dto';
 
@@ -299,6 +303,92 @@ export class ProjectsService {
       bucket.overAllocated = bucket.totalPct > 100;
     }
     return { date: onDate, employees: [...byEmployee.values()] };
+  }
+
+  // ── Milestones & progress ─────────────────────────────────────────────────────
+
+  async listMilestones(projectId: string, actor: AuthenticatedUser) {
+    // canViewProject short-circuits true for an admin regardless of whether the project id
+    // exists, so a read that only calls assertCanViewProject would hand an admin a silent
+    // 200 with an empty list instead of a 404 for a bad id. getProjectRow closes that gap.
+    await this.getProjectRow(projectId);
+    await this.assertCanViewProject(projectId, actor);
+    return this.db
+      .select()
+      .from(projectMilestones)
+      .where(eq(projectMilestones.projectId, projectId))
+      .orderBy(asc(projectMilestones.sortOrder), asc(projectMilestones.dueDate));
+  }
+
+  async createMilestone(projectId: string, dto: CreateMilestoneDto, actor: AuthenticatedUser) {
+    const project = await this.getProjectRow(projectId);
+    await this.assertCanManageProject(project, actor);
+    const [row] = await this.db
+      .insert(projectMilestones)
+      .values({
+        projectId,
+        name: dto.name,
+        description: dto.description ?? null,
+        dueDate: dto.dueDate,
+        sortOrder: dto.sortOrder ?? 0,
+      })
+      .returning();
+    return row;
+  }
+
+  async updateMilestone(id: string, dto: UpdateMilestoneDto, actor: AuthenticatedUser) {
+    const [existing] = await this.db
+      .select()
+      .from(projectMilestones)
+      .where(eq(projectMilestones.id, id));
+    if (!existing) {
+      throw new AppError(ErrorCode.NOT_FOUND, 'Milestone not found', HttpStatus.NOT_FOUND);
+    }
+    const project = await this.getProjectRow(existing.projectId);
+    await this.assertCanManageProject(project, actor);
+
+    // Marking done stamps completedAt; reopening clears it.
+    const completedAt =
+      dto.status === 'done' ? new Date() : dto.status === 'pending' ? null : undefined;
+
+    const [row] = await this.db
+      .update(projectMilestones)
+      .set({
+        ...dto,
+        ...(completedAt !== undefined ? { completedAt } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(projectMilestones.id, id))
+      .returning();
+    return row;
+  }
+
+  async deleteMilestone(id: string, actor: AuthenticatedUser) {
+    const [existing] = await this.db
+      .select()
+      .from(projectMilestones)
+      .where(eq(projectMilestones.id, id));
+    if (!existing) {
+      throw new AppError(ErrorCode.NOT_FOUND, 'Milestone not found', HttpStatus.NOT_FOUND);
+    }
+    const project = await this.getProjectRow(existing.projectId);
+    await this.assertCanManageProject(project, actor);
+    await this.db.delete(projectMilestones).where(eq(projectMilestones.id, id));
+    return { id };
+  }
+
+  async updateProgress(projectId: string, dto: UpdateProgressDto, actor: AuthenticatedUser) {
+    const project = await this.getProjectRow(projectId);
+    await this.assertCanManageProject(project, actor);
+    if (dto.progressPct === undefined && dto.health === undefined) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Nothing to update');
+    }
+    const [row] = await this.db
+      .update(projects)
+      .set({ ...dto, progressUpdatedAt: new Date(), updatedAt: new Date() })
+      .where(eq(projects.id, projectId))
+      .returning();
+    return row;
   }
 
   // ── shared helpers used by the timesheets service ─────────────────────────────

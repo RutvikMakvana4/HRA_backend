@@ -5,6 +5,7 @@ import { TimesheetsService } from './timesheets.service';
 import {
   AllocationsController,
   ClientsController,
+  MilestonesController,
   ProjectsController,
   ReportsController,
   TimesheetsController,
@@ -21,6 +22,7 @@ import {
     ClientsController,
     ProjectsController,
     AllocationsController,
+    MilestonesController,
     TimesheetsController,
     ReportsController,
   ],

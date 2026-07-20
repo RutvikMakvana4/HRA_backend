@@ -150,6 +150,32 @@ export const listAllocationsSchema = z.object({
   scope: z.enum(['me', 'team', 'all']).default('me'),
 });
 
+// ── Milestones & progress ────────────────────────────────────────────────────
+
+export const createMilestoneSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).nullable().optional(),
+  dueDate: dateOnly,
+  sortOrder: z.number().int().min(0).optional(),
+});
+
+export const updateMilestoneSchema = z
+  .object({
+    name: z.string().trim().min(1).max(200).optional(),
+    description: z.string().trim().max(2000).nullable().optional(),
+    dueDate: dateOnly.optional(),
+    status: z.enum(['pending', 'done']).optional(),
+    sortOrder: z.number().int().min(0).optional(),
+  })
+  .strict();
+
+export const updateProgressSchema = z
+  .object({
+    progressPct: z.number().int().min(0).max(100).optional(),
+    health: z.enum(['on_track', 'at_risk', 'delayed']).optional(),
+  })
+  .strict();
+
 export class CreateClientDto extends createZodDto(createClientSchema) {}
 export class UpdateClientDto extends createZodDto(updateClientSchema) {}
 export class CreateProjectDto extends createZodDto(createProjectSchema) {}
@@ -165,3 +191,6 @@ export class ListWeeksDto extends createZodDto(listWeeksSchema) {}
 export class UtilizationReportDto extends createZodDto(utilizationReportSchema) {}
 export class AllocationReportDto extends createZodDto(allocationReportSchema) {}
 export class ListAllocationsDto extends createZodDto(listAllocationsSchema) {}
+export class CreateMilestoneDto extends createZodDto(createMilestoneSchema) {}
+export class UpdateMilestoneDto extends createZodDto(updateMilestoneSchema) {}
+export class UpdateProgressDto extends createZodDto(updateProgressSchema) {}
