@@ -9,6 +9,7 @@ import {
   projectMilestones,
   projectTasks,
   projects,
+  timesheetEntries,
   type Client,
   type Project,
   type ProjectAllocation,
@@ -308,6 +309,99 @@ export class ProjectsService {
       bucket.overAllocated = bucket.totalPct > 100;
     }
     return { date: onDate, employees: [...byEmployee.values()] };
+  }
+
+  // ── Summary ──────────────────────────────────────────────────────────────────
+
+  /**
+   * Every aggregate below is a SEPARATE grouped query merged in JS — never a correlated
+   * subquery interpolating `projectId`, which would emit unqualified and silently match nothing.
+   *
+   * getProjectRow BEFORE assertCanViewProject — same existence-check discipline as
+   * listMilestones/listTasks/listProjectUpdates: canViewProject short-circuits true for an
+   * admin regardless of whether the project id exists, so checking membership first would let
+   * an admin's request for a nonexistent project fall through to a "summary of nothing" 200
+   * instead of a 404, and would give a non-admin a 403 instead of a 404 on a bad id.
+   */
+  async projectSummary(projectId: string, actor: AuthenticatedUser) {
+    const project = await this.getProjectRow(projectId);
+    await this.assertCanViewProject(projectId, actor);
+    const today = new Date().toISOString().slice(0, 10);
+
+    const milestones = await this.db
+      .select({ status: projectMilestones.status, dueDate: projectMilestones.dueDate })
+      .from(projectMilestones)
+      .where(eq(projectMilestones.projectId, projectId));
+
+    const tasks = await this.db
+      .select({ status: projectTasks.status, count: sql<number>`cast(count(*) as int)` })
+      .from(projectTasks)
+      .where(eq(projectTasks.projectId, projectId))
+      .groupBy(projectTasks.status);
+
+    const [hours] = await this.db
+      .select({
+        totalMinutes: sql<number>`cast(coalesce(sum(${timesheetEntries.minutes}), 0) as int)`,
+      })
+      .from(timesheetEntries)
+      .where(eq(timesheetEntries.projectId, projectId));
+
+    const [lastUpdate] = await this.db
+      .select({ workDate: timesheetEntries.workDate })
+      .from(timesheetEntries)
+      .where(eq(timesheetEntries.projectId, projectId))
+      .orderBy(desc(timesheetEntries.workDate))
+      .limit(1);
+
+    const members = await this.db
+      .select({ employeeId: projectAllocations.employeeId })
+      .from(projectAllocations)
+      .where(and(eq(projectAllocations.projectId, projectId), eq(projectAllocations.isActive, true)));
+
+    const updatedToday = await this.db
+      .selectDistinct({ employeeId: timesheetEntries.employeeId })
+      .from(timesheetEntries)
+      .where(
+        and(eq(timesheetEntries.projectId, projectId), eq(timesheetEntries.workDate, today)),
+      );
+
+    return {
+      projectId,
+      health: project.health,
+      progressPct: project.progressPct,
+      progressUpdatedAt: project.progressUpdatedAt,
+      milestonesTotal: milestones.length,
+      milestonesDone: milestones.filter((m) => m.status === 'done').length,
+      milestonesOverdue: milestones.filter((m) => m.status === 'pending' && m.dueDate < today).length,
+      tasksByStatus: Object.fromEntries(tasks.map((t) => [t.status, t.count])),
+      totalHours: Math.round(((hours?.totalMinutes ?? 0) / 60) * 100) / 100,
+      lastUpdateDate: lastUpdate?.workDate ?? null,
+      membersAllocated: members.length,
+      membersUpdatedToday: updatedToday.length,
+    };
+  }
+
+  /** The actor's active projects, each with its summary block. */
+  async myProjects(actor: AuthenticatedUser) {
+    const rows = await this.db
+      .select({ projectId: projectAllocations.projectId })
+      .from(projectAllocations)
+      .where(
+        and(eq(projectAllocations.employeeId, actor.id), eq(projectAllocations.isActive, true)),
+      );
+    const ids = [...new Set(rows.map((r) => r.projectId))];
+    const out = [];
+    for (const id of ids) {
+      const project = await this.getProjectRow(id);
+      out.push({
+        id: project.id,
+        name: project.name,
+        code: project.code,
+        status: project.status,
+        summary: await this.projectSummary(id, actor),
+      });
+    }
+    return out;
   }
 
   // ── Milestones & progress ─────────────────────────────────────────────────────

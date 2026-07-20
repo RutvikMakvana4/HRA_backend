@@ -110,6 +110,11 @@ export class ProjectsController {
     return this.projects.updateProject(id, dto, actor);
   }
 
+  @Get(':id/summary')
+  summary(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.projects.projectSummary(id, actor);
+  }
+
   @Get(':id/allocations')
   listAllocations(@Param('id', ParseUUIDPipe) id: string) {
     return this.projects.listAllocations(id);
@@ -355,6 +360,24 @@ export class MeUpdatesController {
   @Get('updates')
   listMyUpdates(@Query() query: ListUpdatesDto, @CurrentUser() actor: AuthenticatedUser) {
     return this.updates.listMyUpdates(query, actor);
+  }
+}
+
+/**
+ * The actor's own active projects with a summary block each. Shares the `me` path prefix with
+ * MeUpdatesController, ess's MeController and assets' MyAssetsController; the route segments
+ * don't collide.
+ */
+@ApiTags('projects')
+@ApiBearerAuth('access-token')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Controller('me')
+export class MeProjectsController {
+  constructor(private readonly projects: ProjectsService) {}
+
+  @Get('projects')
+  myProjects(@CurrentUser() actor: AuthenticatedUser) {
+    return this.projects.myProjects(actor);
   }
 }
 
