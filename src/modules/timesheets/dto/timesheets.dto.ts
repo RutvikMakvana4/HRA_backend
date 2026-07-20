@@ -225,3 +225,22 @@ export class UpdateProgressDto extends createZodDto(updateProgressSchema) {}
 export class ListTasksDto extends createZodDto(listTasksSchema) {}
 export class CreateTaskDto extends createZodDto(createTaskSchema) {}
 export class UpdateTaskDto extends createZodDto(updateTaskSchema) {}
+
+// ── Updates & comments ───────────────────────────────────────────────────────
+
+export const listUpdatesSchema = z.object({
+  from: dateOnly.optional(),
+  to: dateOnly.optional(),
+});
+
+export const missingUpdatesSchema = z.object({
+  date: dateOnly.optional(),
+});
+
+export const createCommentSchema = z.object({
+  body: z.string().trim().min(1).max(2000),
+});
+
+export class ListUpdatesDto extends createZodDto(listUpdatesSchema) {}
+export class MissingUpdatesDto extends createZodDto(missingUpdatesSchema) {}
+export class CreateCommentDto extends createZodDto(createCommentSchema) {}

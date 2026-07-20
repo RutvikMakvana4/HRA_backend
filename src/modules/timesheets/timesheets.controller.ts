@@ -20,10 +20,12 @@ import { RolesGuard } from '../auth/roles.guard';
 import { Role } from '../auth/roles';
 import { ProjectsService } from './projects.service';
 import { TimesheetsService } from './timesheets.service';
+import { UpdatesService } from './updates.service';
 import {
   AllocationReportDto,
   CreateAllocationDto,
   CreateClientDto,
+  CreateCommentDto,
   CreateMilestoneDto,
   CreateProjectDto,
   CreateTaskDto,
@@ -32,7 +34,9 @@ import {
   ListAllocationsDto,
   ListProjectsDto,
   ListTasksDto,
+  ListUpdatesDto,
   ListWeeksDto,
+  MissingUpdatesDto,
   SaveWeekDto,
   UpdateClientDto,
   UpdateEntryDto,
@@ -80,7 +84,10 @@ export class ClientsController {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('projects')
 export class ProjectsController {
-  constructor(private readonly projects: ProjectsService) {}
+  constructor(
+    private readonly projects: ProjectsService,
+    private readonly updates: UpdatesService,
+  ) {}
 
   @Get()
   list(@Query() query: ListProjectsDto) {
@@ -156,6 +163,24 @@ export class ProjectsController {
     @CurrentUser() actor: AuthenticatedUser,
   ) {
     return this.projects.updateProgress(id, dto, actor);
+  }
+
+  @Get(':id/updates')
+  listUpdates(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListUpdatesDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.updates.listProjectUpdates(id, query, actor);
+  }
+
+  @Get(':id/updates/missing')
+  missingUpdates(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: MissingUpdatesDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.updates.missingUpdates(id, query, actor);
   }
 }
 
@@ -312,5 +337,45 @@ export class ReportsController {
   @Get('allocation')
   allocation(@Query() query: AllocationReportDto, @CurrentUser() actor: AuthenticatedUser) {
     return this.projects.allocationReport(query, actor);
+  }
+}
+
+/**
+ * The actor's own daily updates — no membership check, deliberately (see UpdatesService). Shares
+ * the `me` path prefix with ess's MeController and assets' MyAssetsController; the route segments
+ * don't collide.
+ */
+@ApiTags('projects')
+@ApiBearerAuth('access-token')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Controller('me')
+export class MeUpdatesController {
+  constructor(private readonly updates: UpdatesService) {}
+
+  @Get('updates')
+  listMyUpdates(@Query() query: ListUpdatesDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.updates.listMyUpdates(query, actor);
+  }
+}
+
+@ApiTags('projects')
+@ApiBearerAuth('access-token')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Controller('updates')
+export class UpdatesController {
+  constructor(private readonly updates: UpdatesService) {}
+
+  @Get(':entryId/comments')
+  listComments(@Param('entryId', ParseUUIDPipe) entryId: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.updates.listComments(entryId, actor);
+  }
+
+  @Post(':entryId/comments')
+  addComment(
+    @Param('entryId', ParseUUIDPipe) entryId: string,
+    @Body() dto: CreateCommentDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.updates.addComment(entryId, dto, actor);
   }
 }
