@@ -176,6 +176,34 @@ export const updateProgressSchema = z
   })
   .strict();
 
+// ── Tasks ────────────────────────────────────────────────────────────────────
+
+export const listTasksSchema = z.object({
+  status: z.enum(['todo', 'in_progress', 'blocked', 'done']).optional(),
+  assigneeId: z.uuid().optional(),
+});
+
+export const createTaskSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  description: z.string().trim().max(2000).nullable().optional(),
+  assigneeEmployeeId: z.uuid().nullable().optional(),
+  priority: z.enum(['low', 'medium', 'high']).optional(),
+  dueDate: dateOnly.nullable().optional(),
+  milestoneId: z.uuid().nullable().optional(),
+});
+
+export const updateTaskSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    description: z.string().trim().max(2000).nullable().optional(),
+    assigneeEmployeeId: z.uuid().nullable().optional(),
+    status: z.enum(['todo', 'in_progress', 'blocked', 'done']).optional(),
+    priority: z.enum(['low', 'medium', 'high']).optional(),
+    dueDate: dateOnly.nullable().optional(),
+    milestoneId: z.uuid().nullable().optional(),
+  })
+  .strict();
+
 export class CreateClientDto extends createZodDto(createClientSchema) {}
 export class UpdateClientDto extends createZodDto(updateClientSchema) {}
 export class CreateProjectDto extends createZodDto(createProjectSchema) {}
@@ -194,3 +222,6 @@ export class ListAllocationsDto extends createZodDto(listAllocationsSchema) {}
 export class CreateMilestoneDto extends createZodDto(createMilestoneSchema) {}
 export class UpdateMilestoneDto extends createZodDto(updateMilestoneSchema) {}
 export class UpdateProgressDto extends createZodDto(updateProgressSchema) {}
+export class ListTasksDto extends createZodDto(listTasksSchema) {}
+export class CreateTaskDto extends createZodDto(createTaskSchema) {}
+export class UpdateTaskDto extends createZodDto(updateTaskSchema) {}

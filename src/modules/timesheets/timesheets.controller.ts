@@ -26,10 +26,12 @@ import {
   CreateClientDto,
   CreateMilestoneDto,
   CreateProjectDto,
+  CreateTaskDto,
   DecideWeekDto,
   GetWeekDto,
   ListAllocationsDto,
   ListProjectsDto,
+  ListTasksDto,
   ListWeeksDto,
   SaveWeekDto,
   UpdateClientDto,
@@ -37,6 +39,7 @@ import {
   UpdateMilestoneDto,
   UpdateProgressDto,
   UpdateProjectDto,
+  UpdateTaskDto,
   UpsertEntryDto,
   UtilizationReportDto,
 } from './dto/timesheets.dto';
@@ -128,6 +131,24 @@ export class ProjectsController {
     return this.projects.createMilestone(id, dto, actor);
   }
 
+  @Get(':id/tasks')
+  listTasks(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query() query: ListTasksDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.projects.listTasks(id, query, actor);
+  }
+
+  @Post(':id/tasks')
+  createTask(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CreateTaskDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.projects.createTask(id, dto, actor);
+  }
+
   @Patch(':id/progress')
   updateProgress(
     @Param('id', ParseUUIDPipe) id: string,
@@ -177,6 +198,29 @@ export class MilestonesController {
   @HttpCode(HttpStatus.OK)
   remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
     return this.projects.deleteMilestone(id, actor);
+  }
+}
+
+@ApiTags('projects')
+@ApiBearerAuth('access-token')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Controller('tasks')
+export class TasksController {
+  constructor(private readonly projects: ProjectsService) {}
+
+  @Patch(':id')
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateTaskDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.projects.updateTask(id, dto, actor);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.OK)
+  remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.projects.deleteTask(id, actor);
   }
 }
 

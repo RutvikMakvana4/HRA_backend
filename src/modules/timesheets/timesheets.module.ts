@@ -8,6 +8,7 @@ import {
   MilestonesController,
   ProjectsController,
   ReportsController,
+  TasksController,
   TimesheetsController,
 } from './timesheets.controller';
 
@@ -23,6 +24,7 @@ import {
     ProjectsController,
     AllocationsController,
     MilestonesController,
+    TasksController,
     TimesheetsController,
     ReportsController,
   ],
