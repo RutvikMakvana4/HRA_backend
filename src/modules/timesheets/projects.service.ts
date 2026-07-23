@@ -161,8 +161,13 @@ export class ProjectsService {
 
   // ── Allocations ──────────────────────────────────────────────────────────────
 
-  async listAllocations(projectId: string) {
+  async listAllocations(projectId: string, actor: AuthenticatedUser) {
+    // Same existence-check gap listMilestones/listTasks close: canViewProject short-circuits
+    // true for an admin regardless of whether the project id exists, so a read that only asserts
+    // view access would hand an admin a silent 200 with an empty array for a bad id instead of a
+    // 404. getProjectRow closes that before membership is even evaluated.
     await this.getProjectRow(projectId);
+    await this.assertCanViewProject(projectId, actor);
     return this.db
       .select({
         id: projectAllocations.id,

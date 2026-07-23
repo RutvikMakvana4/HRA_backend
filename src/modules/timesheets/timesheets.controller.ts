@@ -116,8 +116,8 @@ export class ProjectsController {
   }
 
   @Get(':id/allocations')
-  listAllocations(@Param('id', ParseUUIDPipe) id: string) {
-    return this.projects.listAllocations(id);
+  listAllocations(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.projects.listAllocations(id, actor);
   }
 
   @Post(':id/allocations')
