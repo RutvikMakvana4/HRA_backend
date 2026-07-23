@@ -142,21 +142,73 @@ export class TimesheetsService {
     }
 
     await this.db.transaction(async (tx) => {
-      await tx.delete(timesheetEntries).where(eq(timesheetEntries.weekId, week.id));
-      if (cells.length) {
-        await tx.insert(timesheetEntries).values(
-          cells.map((c) => ({
+      // Diff against the existing rows rather than deleting the whole week and
+      // reinserting. Entry ids must survive across saves: a comment references its
+      // entry (update_comments.entry_id, ON DELETE CASCADE), so a blanket delete
+      // would wipe every comment on that week's daily updates whenever an unrelated
+      // cell is edited. Match on (projectId, workDate) — the grid's one-cell-per-day
+      // key — updating survivors in place, inserting new cells, and deleting only the
+      // cells that are genuinely gone (whose update, and so whose comments, truly go).
+      const existing = await tx
+        .select({
+          id: timesheetEntries.id,
+          projectId: timesheetEntries.projectId,
+          workDate: timesheetEntries.workDate,
+        })
+        .from(timesheetEntries)
+        .where(eq(timesheetEntries.weekId, week.id));
+
+      const keyOf = (projectId: string, workDate: string) => `${projectId}|${workDate}`;
+      const existingByKey = new Map<string, string[]>();
+      for (const e of existing) {
+        const arr = existingByKey.get(keyOf(e.projectId, e.workDate));
+        if (arr) arr.push(e.id);
+        else existingByKey.set(keyOf(e.projectId, e.workDate), [e.id]);
+      }
+
+      const incomingKeys = new Set<string>();
+      for (const c of cells) {
+        const key = keyOf(c.projectId, c.workDate);
+        incomingKeys.add(key);
+        const values = {
+          minutes: Math.round(c.hours * 60),
+          billable: c.billable ?? defaults.get(c.projectId) ?? true,
+          taskDescription: c.taskDescription ?? null,
+          taskId: c.taskId ?? null,
+          status: 'draft' as const,
+          // Bump on the in-place update (the reinsert used to refresh it for free);
+          // matches upsertEntry / updateEntry, which set this explicitly.
+          updatedAt: new Date(),
+        };
+        const [keepId, ...dupIds] = existingByKey.get(key) ?? [];
+        if (keepId) {
+          // Preserve the surviving row's id; drop any stray duplicates for the key.
+          await tx
+            .update(timesheetEntries)
+            .set(values)
+            .where(eq(timesheetEntries.id, keepId));
+          if (dupIds.length) {
+            await tx
+              .delete(timesheetEntries)
+              .where(inArray(timesheetEntries.id, dupIds));
+          }
+        } else {
+          await tx.insert(timesheetEntries).values({
             weekId: week.id,
             employeeId: actor.id,
             projectId: c.projectId,
             workDate: c.workDate,
-            minutes: Math.round(c.hours * 60),
-            billable: c.billable ?? defaults.get(c.projectId) ?? true,
-            taskDescription: c.taskDescription ?? null,
-            taskId: c.taskId ?? null,
-            status: 'draft' as const,
-          })),
-        );
+            ...values,
+          });
+        }
+      }
+
+      const staleIds: string[] = [];
+      for (const [key, ids] of existingByKey) {
+        if (!incomingKeys.has(key)) staleIds.push(...ids);
+      }
+      if (staleIds.length) {
+        await tx.delete(timesheetEntries).where(inArray(timesheetEntries.id, staleIds));
       }
     });
 
