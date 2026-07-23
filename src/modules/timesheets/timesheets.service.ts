@@ -153,6 +153,7 @@ export class TimesheetsService {
             minutes: Math.round(c.hours * 60),
             billable: c.billable ?? defaults.get(c.projectId) ?? true,
             taskDescription: c.taskDescription ?? null,
+            taskId: c.taskId ?? null,
             status: 'draft' as const,
           })),
         );

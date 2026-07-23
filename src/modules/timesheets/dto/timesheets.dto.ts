@@ -119,6 +119,7 @@ export const saveWeekCellSchema = z.object({
   hours: z.number().min(0).max(24),
   billable: z.boolean().optional(),
   taskDescription: z.string().trim().max(500).nullable().optional(),
+  taskId: z.uuid().nullable().optional(),
 });
 
 /** Replace a whole week's entries in one call — the frontend grid saves this shape. */
