@@ -470,6 +470,7 @@ export class TimesheetsService {
         minutes: timesheetEntries.minutes,
         billable: timesheetEntries.billable,
         taskDescription: timesheetEntries.taskDescription,
+        taskId: timesheetEntries.taskId,
         category: timesheetEntries.category,
         status: timesheetEntries.status,
       })
