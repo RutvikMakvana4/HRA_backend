@@ -1,0 +1,1 @@
+ALTER TABLE "timesheet_entries" ADD CONSTRAINT "uq_timesheet_entry_cell" UNIQUE("week_id","project_id","work_date");

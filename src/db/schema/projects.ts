@@ -244,6 +244,11 @@ export const timesheetEntries = pgTable(
     weekIdx: index('ix_timesheet_entries_week').on(t.weekId),
     employeeDateIdx: index('ix_timesheet_entries_employee_date').on(t.employeeId, t.workDate),
     projectIdx: index('ix_timesheet_entries_project').on(t.projectId),
+    // One row per cell. A week belongs to one employee, so (week, project, date) is
+    // the cell identity saveWeek diffs on; the DB enforces it too, so no code path
+    // (or concurrent save) can mint duplicate entries now that saveWeek no longer
+    // blanket-deletes and reinserts the week.
+    uniqCell: unique('uq_timesheet_entry_cell').on(t.weekId, t.projectId, t.workDate),
   }),
 );
 
