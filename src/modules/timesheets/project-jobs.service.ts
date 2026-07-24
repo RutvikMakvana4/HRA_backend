@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { and, eq, gte, isNotNull, lte, sql } from 'drizzle-orm';
+import { and, eq, gte, isNotNull, isNull, lte, sql } from 'drizzle-orm';
 import type { Database } from '../../db/client';
 import {
   leaveRequests,
@@ -227,6 +227,90 @@ export class ProjectJobsService {
         .where(eq(timesheetEntries.weekId, w.id));
       if (Number(n) === 0) continue; // nothing logged that week — skip (covers "on full leave")
       await this.timesheetsService.autoSubmitWeek(w.id);
+    }
+  }
+
+  /**
+   * Mon–Sat 11:00 IST — nudge anyone on an active project who hasn't yet committed to a task
+   * today (no entry logged for today at all) and isn't on approved leave.
+   */
+  @Cron('0 11 * * 1-6', { timeZone: 'Asia/Kolkata' })
+  async remindAddTasks(): Promise<void> {
+    const today = new Date().toISOString().slice(0, 10);
+
+    const members = await this.db
+      .selectDistinct({ employeeId: projectAllocations.employeeId })
+      .from(projectAllocations)
+      .innerJoin(projects, eq(projects.id, projectAllocations.projectId))
+      .where(and(eq(projectAllocations.isActive, true), eq(projects.status, 'active')));
+    if (members.length === 0) return;
+
+    const committedRows = await this.db
+      .selectDistinct({ employeeId: timesheetEntries.employeeId })
+      .from(timesheetEntries)
+      .where(eq(timesheetEntries.workDate, today));
+    const committed = new Set(committedRows.map((r) => r.employeeId));
+
+    // On approved leave today — never nag someone who was away.
+    const away = await this.db
+      .selectDistinct({ employeeId: leaveRequests.employeeId })
+      .from(leaveRequests)
+      .where(
+        and(
+          eq(leaveRequests.status, 'approved'),
+          lte(leaveRequests.startDate, today),
+          gte(leaveRequests.endDate, today),
+        ),
+      );
+    const onLeave = new Set(away.map((r) => r.employeeId));
+
+    for (const { employeeId } of members) {
+      if (committed.has(employeeId) || onLeave.has(employeeId)) continue;
+      await this.notify(employeeId, 'Add your tasks for today', "Standup done — add what you'll work on.", '/my-day');
+    }
+  }
+
+  /**
+   * Mon–Sat 19:00 IST — nudge anyone who committed to a task today but left it empty (no hours,
+   * no note) to fill in details and mark it done.
+   */
+  @Cron('0 19 * * 1-6', { timeZone: 'Asia/Kolkata' })
+  async remindFillDetails(): Promise<void> {
+    const today = new Date().toISOString().slice(0, 10);
+
+    const pendingRows = await this.db
+      .selectDistinct({ employeeId: timesheetEntries.employeeId })
+      .from(timesheetEntries)
+      .where(
+        and(
+          eq(timesheetEntries.workDate, today),
+          eq(timesheetEntries.minutes, 0),
+          isNull(timesheetEntries.taskDescription),
+        ),
+      );
+    if (pendingRows.length === 0) return;
+
+    // On approved leave today — never nag someone who was away.
+    const away = await this.db
+      .selectDistinct({ employeeId: leaveRequests.employeeId })
+      .from(leaveRequests)
+      .where(
+        and(
+          eq(leaveRequests.status, 'approved'),
+          lte(leaveRequests.startDate, today),
+          gte(leaveRequests.endDate, today),
+        ),
+      );
+    const onLeave = new Set(away.map((r) => r.employeeId));
+
+    for (const { employeeId } of pendingRows) {
+      if (onLeave.has(employeeId)) continue;
+      await this.notify(
+        employeeId,
+        "Add today's details",
+        'Log hours + a note on your tasks, and mark done if finished.',
+        '/my-day',
+      );
     }
   }
 }
