@@ -175,6 +175,35 @@ export class TimesheetsService {
       .where(eq(timesheetEntries.weekId, id));
     if (!count) throw new AppError(ErrorCode.VALIDATION_FAILED, 'Cannot submit an empty week');
 
+    return this.doSubmit(week, actor);
+  }
+
+  /**
+   * System-initiated submit for the Sunday-night auto-submit cron — same transition as
+   * `submitWeek`'s core (`doSubmit`), but with no owner gate and no empty-week guard: the caller
+   * (`ProjectJobsService.autoSubmitWeeks`) already filters to draft weeks with ≥1 entry logged.
+   * The audit actor is a synthetic actor for the week's own employee, so the audit trail reads as
+   * the employee's own submit rather than an anonymous system action.
+   */
+  async autoSubmitWeek(id: string) {
+    const week = await this.getWeekRow(id);
+    if (week.status !== 'draft' && week.status !== 'rejected') {
+      throw new AppError(ErrorCode.CONFLICT, `Week is already ${week.status}`, HttpStatus.CONFLICT);
+    }
+    const actor: AuthenticatedUser = {
+      id: week.employeeId,
+      uid: week.employeeId,
+      roles: [],
+      permissions: [],
+      scope: null,
+      sid: 'system',
+      type: 'user',
+    };
+    return this.doSubmit(week, actor);
+  }
+
+  /** Shared submit core: resolve the approver, transition to `submitted`, notify the approver. */
+  private async doSubmit(week: TimesheetWeek, actor: AuthenticatedUser) {
     const [employee] = await this.db
       .select({ managerId: employees.managerId })
       .from(employees)

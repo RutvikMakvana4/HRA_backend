@@ -9,17 +9,25 @@ import {
   projectMilestones,
   projects,
   timesheetEntries,
+  timesheetWeeks,
 } from '../../db/schema';
 import { DRIZZLE } from '../../common/constants';
+import { TimesheetsService } from './timesheets.service';
 
 /**
- * Module 7 scheduled reminders (PRD §5). Three jobs: a missing-daily-update nudge, a milestone
- * due/overdue nudge, and a weekly per-project roll-up to the PM. All three write through the same
+ * Module 7 scheduled reminders (PRD §5), plus the Sunday-night timesheet auto-submit. Jobs: a
+ * missing-daily-update nudge, a milestone due/overdue nudge, a weekly per-project roll-up to the
+ * PM, the Sunday-night auto-submit of worked weeks, and two daily nudges (add-task / fill-details)
+ * for the task-first timesheet flow. All the notification-sending jobs write through the same
  * `notifications` insert every other service in this module uses — no separate helper invented.
+ * Injects `TimesheetsService` (no cycle: `TimesheetsService` does not inject this service back).
  */
 @Injectable()
 export class ProjectJobsService {
-  constructor(@Inject(DRIZZLE) private readonly db: Database) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Database,
+    private readonly timesheetsService: TimesheetsService,
+  ) {}
 
   private async notify(employeeId: string, title: string, body: string, href: string) {
     await this.db.insert(notifications).values({ employeeId, title, body, href });
@@ -187,6 +195,38 @@ export class ProjectJobsService {
       ].join(' · ');
 
       await this.notify(p.pmEmployeeId, `Weekly summary — ${p.name}`, body, `/projects/${p.id}`);
+    }
+  }
+
+  /** The Monday (UTC) of the week containing "now" — generic day-of-week math, no hardcoded offset. */
+  private mondayOfThisWeek(): string {
+    const d = new Date();
+    const dow = d.getUTCDay(); // 0=Sun..6=Sat
+    const diff = dow === 0 ? -6 : 1 - dow;
+    d.setUTCDate(d.getUTCDate() + diff);
+    return d.toISOString().slice(0, 10);
+  }
+
+  /**
+   * Sunday 23:00 IST — end of the Mon–Sun week. Auto-submits any still-draft week that has at
+   * least one entry logged (an untouched week — e.g. someone on full leave all week — is left
+   * alone rather than force-submitted empty).
+   */
+  @Cron('0 23 * * 0', { timeZone: 'Asia/Kolkata' })
+  async autoSubmitWeeks(): Promise<void> {
+    const weekStart = this.mondayOfThisWeek();
+    const draftWeeks = await this.db
+      .select()
+      .from(timesheetWeeks)
+      .where(and(eq(timesheetWeeks.weekStartDate, weekStart), eq(timesheetWeeks.status, 'draft')));
+
+    for (const w of draftWeeks) {
+      const [{ n } = { n: 0 }] = await this.db
+        .select({ n: sql<number>`cast(count(*) as int)` })
+        .from(timesheetEntries)
+        .where(eq(timesheetEntries.weekId, w.id));
+      if (Number(n) === 0) continue; // nothing logged that week — skip (covers "on full leave")
+      await this.timesheetsService.autoSubmitWeek(w.id);
     }
   }
 }
