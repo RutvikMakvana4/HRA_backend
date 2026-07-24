@@ -6,6 +6,7 @@ import {
   holidays,
   leaveRequests,
   notifications,
+  projectTasks,
   projects,
   timesheetEntries,
   timesheetWeeks,
@@ -19,6 +20,7 @@ import { isAdminOrAbove } from '../auth/roles';
 import { EmployeesService } from '../employees/employees.service';
 import { ProjectsService } from './projects.service';
 import type { GetWeekDto, ListWeeksDto, UtilizationReportDto } from './dto/timesheets.dto';
+import { isOvertimeDate, splitMinutes } from './overtime.util';
 
 /** Standard working day for capacity (utilization denominator). Minutes. */
 const STANDARD_DAY_MINUTES = 8 * 60;
@@ -190,6 +192,69 @@ export class TimesheetsService {
     return row;
   }
 
+  /**
+   * Regular (Mon–Sat) vs overtime (Sunday) hours for one week, plus a per-task breakdown. Readable
+   * by the week's owner or anyone who could approve it (reuses `canApprove`, the same gate
+   * `decideWeek` uses) — not just the approver, since the owner should see their own split too.
+   */
+  async weekSummary(id: string, actor: AuthenticatedUser) {
+    const week = await this.getWeekRow(id);
+    if (week.employeeId !== actor.id && !(await this.canApprove(week, actor))) {
+      throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to view this week summary', HttpStatus.FORBIDDEN);
+    }
+
+    const rows = await this.db
+      .select({
+        taskId: timesheetEntries.taskId,
+        taskTitle: projectTasks.title,
+        projectName: projects.name,
+        workDate: timesheetEntries.workDate,
+        minutes: timesheetEntries.minutes,
+      })
+      .from(timesheetEntries)
+      .innerJoin(projectTasks, eq(projectTasks.id, timesheetEntries.taskId))
+      .innerJoin(projects, eq(projects.id, timesheetEntries.projectId))
+      .where(eq(timesheetEntries.weekId, id));
+
+    const { regular, overtime } = splitMinutes(rows);
+
+    // One row per (task, isOvertime) bucket — a task worked both on a weekday and a Sunday
+    // shows up as two rows rather than blurring an overtime flag onto its regular hours.
+    const byTask = new Map<
+      string,
+      { taskId: string; taskTitle: string; projectName: string; minutes: number; isOvertime: boolean }
+    >();
+    for (const r of rows) {
+      const isOvertime = isOvertimeDate(r.workDate);
+      const key = `${r.taskId}:${isOvertime}`;
+      const existing = byTask.get(key);
+      if (existing) {
+        existing.minutes += r.minutes;
+      } else {
+        byTask.set(key, {
+          taskId: r.taskId,
+          taskTitle: r.taskTitle,
+          projectName: r.projectName,
+          minutes: r.minutes,
+          isOvertime,
+        });
+      }
+    }
+
+    return {
+      regularHours: this.toHours(regular),
+      overtimeHours: this.toHours(overtime),
+      totalHours: this.toHours(regular + overtime),
+      byTask: Array.from(byTask.values()).map((t) => ({
+        taskId: t.taskId,
+        taskTitle: t.taskTitle,
+        projectName: t.projectName,
+        hours: this.toHours(t.minutes),
+        isOvertime: t.isOvertime,
+      })),
+    };
+  }
+
   approveWeek(id: string, note: string | undefined, actor: AuthenticatedUser) {
     return this.decideWeek(id, 'approved', note, actor);
   }
@@ -307,19 +372,46 @@ export class TimesheetsService {
             .groupBy(timesheetEntries.weekId);
     const billableByWeek = new Map(billable.map((b) => [b.weekId, b.billableMinutes]));
 
-    return rows.map((r) => ({
-      id: r.id,
-      employeeId: r.employeeId,
-      employeeName: r.employeeName,
-      weekStartDate: r.weekStartDate,
-      status: r.status,
-      totalHours: this.toHours(r.totalMinutes),
-      billableHours: this.toHours(billableByWeek.get(r.id) ?? 0),
-      submittedAt: r.submittedAt,
-      approverId: r.approverId,
-      decidedAt: r.decidedAt,
-      decisionNote: r.decisionNote,
-    }));
+    // Regular vs overtime minutes per week — ONE grouped query over all listed weeks' entries
+    // (grouped by weekId + workDate, i.e. day-level totals), then bucketed Mon-Sat vs Sunday via
+    // the shared `splitMinutes` predicate in JS. No per-row query, no correlated subquery.
+    const daily =
+      weekIds.length === 0
+        ? []
+        : await this.db
+            .select({
+              weekId: timesheetEntries.weekId,
+              workDate: timesheetEntries.workDate,
+              minutes: sql<number>`cast(coalesce(sum(${timesheetEntries.minutes}), 0) as int)`,
+            })
+            .from(timesheetEntries)
+            .where(inArray(timesheetEntries.weekId, weekIds))
+            .groupBy(timesheetEntries.weekId, timesheetEntries.workDate);
+    const dailyByWeek = new Map<string, { workDate: string; minutes: number }[]>();
+    for (const d of daily) {
+      const list = dailyByWeek.get(d.weekId);
+      if (list) list.push(d);
+      else dailyByWeek.set(d.weekId, [d]);
+    }
+
+    return rows.map((r) => {
+      const { regular, overtime } = splitMinutes(dailyByWeek.get(r.id) ?? []);
+      return {
+        id: r.id,
+        employeeId: r.employeeId,
+        employeeName: r.employeeName,
+        weekStartDate: r.weekStartDate,
+        status: r.status,
+        totalHours: this.toHours(r.totalMinutes),
+        billableHours: this.toHours(billableByWeek.get(r.id) ?? 0),
+        regularHours: this.toHours(regular),
+        overtimeHours: this.toHours(overtime),
+        submittedAt: r.submittedAt,
+        approverId: r.approverId,
+        decidedAt: r.decidedAt,
+        decisionNote: r.decisionNote,
+      };
+    });
   }
 
   // ── internals ────────────────────────────────────────────────────────────────

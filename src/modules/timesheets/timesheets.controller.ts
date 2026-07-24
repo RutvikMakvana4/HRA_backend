@@ -290,6 +290,11 @@ export class TimesheetsController {
     return this.timesheets.deleteEntry(id, actor);
   }
 
+  @Get('week/:id/summary')
+  summary(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.timesheets.weekSummary(id, actor);
+  }
+
   @Post('week/:id/submit')
   @HttpCode(HttpStatus.OK)
   submit(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
