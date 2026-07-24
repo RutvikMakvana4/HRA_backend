@@ -527,6 +527,7 @@ export class ProjectsService {
         priority: projectTasks.priority,
         dueDate: projectTasks.dueDate,
         milestoneId: projectTasks.milestoneId,
+        blockedReason: projectTasks.blockedReason,
         createdBy: projectTasks.createdBy,
         sortOrder: projectTasks.sortOrder,
         createdAt: projectTasks.createdAt,
@@ -563,6 +564,7 @@ export class ProjectsService {
         priority: dto.priority ?? 'medium',
         dueDate: dto.dueDate ?? null,
         milestoneId: dto.milestoneId ?? null,
+        blockedReason: dto.blockedReason ?? null,
         createdBy: actor.id,
       })
       .returning();
@@ -627,16 +629,34 @@ export class ProjectsService {
       patch.assignedAt = next ? new Date() : null;
     }
 
-    // 4. Status — PM/admin or the current assignee.
-    if (touches('status')) {
+    // 4. Status — PM/admin or the current assignee. `blockedReason` is governed by this SAME
+    // gate rather than its own — a plain member who is neither the manager nor the assignee must
+    // not be able to set or edit it, whether through a status change or a bare `{ blockedReason }`
+    // patch. Keeping it out of the generic field-copy loop below is what makes that hold.
+    if (touches('status') || touches('blockedReason')) {
       if (!canManage && task.assigneeEmployeeId !== actor.id) {
         throw new AppError(
           ErrorCode.FORBIDDEN,
-          'Only the assignee or the PM can change this task’s status',
+          'Only the assignee or the PM can change this task’s status or blocked reason',
           HttpStatus.FORBIDDEN,
         );
       }
-      patch.status = dto.status;
+      if (touches('status')) patch.status = dto.status;
+
+      const nextStatus = dto.status ?? task.status;
+      if (nextStatus === 'blocked') {
+        const reason = dto.blockedReason ?? task.blockedReason;
+        if (!reason) {
+          throw new AppError(
+            ErrorCode.BAD_REQUEST,
+            'A blocked task needs a reason',
+            HttpStatus.BAD_REQUEST,
+          );
+        }
+        patch.blockedReason = reason;
+      } else if (task.status === 'blocked') {
+        patch.blockedReason = null;
+      }
     }
 
     for (const k of ['title', 'description', 'dueDate', 'priority', 'milestoneId'] as const) {

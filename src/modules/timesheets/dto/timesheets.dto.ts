@@ -154,6 +154,7 @@ export const createTaskSchema = z.object({
   priority: z.enum(['low', 'medium', 'high']).optional(),
   dueDate: dateOnly.nullable().optional(),
   milestoneId: z.uuid().nullable().optional(),
+  blockedReason: z.string().trim().min(1).max(500).nullable().optional(),
 });
 
 export const updateTaskSchema = z
@@ -165,6 +166,7 @@ export const updateTaskSchema = z
     priority: z.enum(['low', 'medium', 'high']).optional(),
     dueDate: dateOnly.nullable().optional(),
     milestoneId: z.uuid().nullable().optional(),
+    blockedReason: z.string().trim().min(1).max(500).nullable().optional(),
   })
   .strict();
 
