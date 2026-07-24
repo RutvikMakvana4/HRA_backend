@@ -36,6 +36,7 @@ import {
   ListTasksDto,
   ListUpdatesDto,
   ListWeeksDto,
+  LogTaskWorkDto,
   MissingUpdatesDto,
   UpdateClientDto,
   UpdateMilestoneDto,
@@ -248,6 +249,20 @@ export class TasksController {
   @HttpCode(HttpStatus.OK)
   remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
     return this.projects.deleteTask(id, actor);
+  }
+
+  @Post(':id/log')
+  logWork(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: LogTaskWorkDto,
+    @CurrentUser() actor: AuthenticatedUser,
+  ) {
+    return this.projects.logTaskWork(id, dto, actor);
+  }
+
+  @Get(':id/log')
+  taskLog(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() actor: AuthenticatedUser) {
+    return this.projects.listTaskLog(id, actor);
   }
 }
 

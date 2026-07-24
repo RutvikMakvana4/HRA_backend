@@ -1,4 +1,4 @@
-import { HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { forwardRef, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import { alias, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { Database } from '../../db/client';
@@ -10,6 +10,7 @@ import {
   projectTasks,
   projects,
   timesheetEntries,
+  updateComments,
   type Client,
   type Project,
   type ProjectAllocation,
@@ -20,6 +21,7 @@ import { AUDIT_SERVICE, type AuditService } from '../../common/audit/audit.inter
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { isAdminOrAbove } from '../auth/roles';
 import { EmployeesService } from '../employees/employees.service';
+import { TimesheetsService } from './timesheets.service';
 import type {
   AllocationReportDto,
   CreateAllocationDto,
@@ -30,6 +32,7 @@ import type {
   ListAllocationsDto,
   ListProjectsDto,
   ListTasksDto,
+  LogTaskWorkDto,
   UpdateClientDto,
   UpdateMilestoneDto,
   UpdateProgressDto,
@@ -43,6 +46,7 @@ export class ProjectsService {
     @Inject(DRIZZLE) private readonly db: Database,
     @Inject(AUDIT_SERVICE) private readonly audit: AuditService,
     private readonly employeesService: EmployeesService,
+    @Inject(forwardRef(() => TimesheetsService)) private readonly timesheetsService: TimesheetsService,
   ) {}
 
   // ── Clients ────────────────────────────────────────────────────────────────
@@ -696,6 +700,73 @@ export class ProjectsService {
       .set({ archivedAt: new Date() })
       .where(eq(projectTasks.id, id));
     return { id };
+  }
+
+  // ── Task-scoped work logging (v2) ─────────────────────────────────────────────
+
+  /**
+   * Log time+notes ON a task, for a single day. The v2 write path — this is the only caller of
+   * `TimesheetsService.upsertTaskEntry`, which is in turn the only writer of a `timesheet_entries`
+   * row. Gated on view access (members, PM, or admin may log); an archived task refuses writes
+   * outright, since there is nothing left to log against.
+   */
+  async logTaskWork(taskId: string, dto: LogTaskWorkDto, actor: AuthenticatedUser) {
+    const [task] = await this.db.select().from(projectTasks).where(eq(projectTasks.id, taskId));
+    if (!task) throw new AppError(ErrorCode.NOT_FOUND, 'Task not found', HttpStatus.NOT_FOUND);
+    if (task.archivedAt) {
+      throw new AppError(ErrorCode.BAD_REQUEST, 'Task is archived', HttpStatus.BAD_REQUEST);
+    }
+    await this.assertCanViewProject(task.projectId, actor);
+    return this.timesheetsService.upsertTaskEntry(taskId, task.projectId, dto, actor);
+  }
+
+  /**
+   * The task's log — its entries across dates (its thread), newest first, with author name and
+   * comment count. Unlike `logTaskWork`, an archived task's history is still readable: reading
+   * the past never needs to be refused just because the task itself is closed out.
+   */
+  async listTaskLog(taskId: string, actor: AuthenticatedUser) {
+    const [task] = await this.db.select().from(projectTasks).where(eq(projectTasks.id, taskId));
+    if (!task) throw new AppError(ErrorCode.NOT_FOUND, 'Task not found', HttpStatus.NOT_FOUND);
+    await this.assertCanViewProject(task.projectId, actor);
+
+    const rows = await this.db
+      .select({
+        id: timesheetEntries.id,
+        workDate: timesheetEntries.workDate,
+        minutes: timesheetEntries.minutes,
+        billable: timesheetEntries.billable,
+        taskDescription: timesheetEntries.taskDescription,
+        employeeId: timesheetEntries.employeeId,
+        employeeName: this.nameExpr(),
+      })
+      .from(timesheetEntries)
+      .innerJoin(employees, eq(employees.id, timesheetEntries.employeeId))
+      .where(eq(timesheetEntries.taskId, taskId))
+      .orderBy(desc(timesheetEntries.workDate));
+
+    // Comment counts: a SEPARATE grouped query over update_comments (never a correlated
+    // subquery), merged in JS — same pattern as UpdatesService.withCommentCounts. Guarded for the
+    // empty case: an `inArray` with no ids must not even be built.
+    const ids = rows.map((r) => r.id);
+    const counts =
+      ids.length === 0
+        ? []
+        : await this.db
+            .select({
+              entryId: updateComments.entryId,
+              count: sql<number>`cast(count(*) as int)`,
+            })
+            .from(updateComments)
+            .where(inArray(updateComments.entryId, ids))
+            .groupBy(updateComments.entryId);
+    const countByEntry = new Map(counts.map((c) => [c.entryId, c.count]));
+
+    return rows.map(({ minutes, ...rest }) => ({
+      ...rest,
+      hours: Math.round((minutes / 60) * 100) / 100,
+      commentCount: countByEntry.get(rest.id) ?? 0,
+    }));
   }
 
   // ── shared helpers used by the timesheets service ─────────────────────────────

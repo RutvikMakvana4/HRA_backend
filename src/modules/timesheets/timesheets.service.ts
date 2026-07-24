@@ -1,4 +1,4 @@
-import { HttpStatus, Inject, Injectable } from '@nestjs/common';
+import { forwardRef, HttpStatus, Inject, Injectable } from '@nestjs/common';
 import { and, asc, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import type { Database } from '../../db/client';
 import {
@@ -31,7 +31,7 @@ export class TimesheetsService {
     @Inject(DRIZZLE) private readonly db: Database,
     @Inject(AUDIT_SERVICE) private readonly audit: AuditService,
     private readonly employeesService: EmployeesService,
-    private readonly projectsService: ProjectsService,
+    @Inject(forwardRef(() => ProjectsService)) private readonly projectsService: ProjectsService,
   ) {}
 
   // ── Week view ────────────────────────────────────────────────────────────────
@@ -84,6 +84,64 @@ export class TimesheetsService {
       nonWorkingDays,
       warnings,
     };
+  }
+
+  /**
+   * The v2 write path — the ONLY place a `timesheet_entries` row is written. Keyed by
+   * (week, task, work_date) per the `uq_timesheet_entry_task_day` constraint, so logging twice
+   * on the same task/day UPDATES in place (preserving the entry id, so `update_comments`
+   * — ON DELETE CASCADE off `entry_id` — survive) rather than inserting a duplicate row.
+   * `hours: 0` is allowed deliberately: a morning "committed to this today" with no time yet.
+   */
+  async upsertTaskEntry(
+    taskId: string,
+    projectId: string,
+    dto: { workDate: string; hours: number; note?: string | null; billable?: boolean },
+    actor: AuthenticatedUser,
+  ) {
+    const week = await this.ensureDraftWeek(actor.id, this.mondayOf(dto.workDate));
+    this.assertDraft(week);
+    const project = await this.projectsService.getProjectRow(projectId);
+    const minutes = Math.round(dto.hours * 60);
+    const billable = dto.billable ?? project.defaultBillable;
+
+    const [existing] = await this.db
+      .select({ id: timesheetEntries.id })
+      .from(timesheetEntries)
+      .where(
+        and(
+          eq(timesheetEntries.weekId, week.id),
+          eq(timesheetEntries.taskId, taskId),
+          eq(timesheetEntries.workDate, dto.workDate),
+        ),
+      );
+
+    let row;
+    if (existing) {
+      [row] = await this.db
+        .update(timesheetEntries)
+        .set({ minutes, billable, taskDescription: dto.note ?? null, updatedAt: new Date() })
+        .where(eq(timesheetEntries.id, existing.id))
+        .returning(); // preserve id → comments survive
+    } else {
+      [row] = await this.db
+        .insert(timesheetEntries)
+        .values({
+          weekId: week.id,
+          employeeId: actor.id,
+          projectId,
+          taskId,
+          workDate: dto.workDate,
+          minutes,
+          billable,
+          taskDescription: dto.note ?? null,
+          status: 'draft',
+        })
+        .returning();
+    }
+    if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to log task work');
+    await this.recomputeWeekTotal(week.id);
+    return { ...row, hours: this.toHours(row.minutes) };
   }
 
   async deleteEntry(id: string, actor: AuthenticatedUser) {

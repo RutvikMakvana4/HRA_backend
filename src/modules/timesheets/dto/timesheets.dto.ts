@@ -207,3 +207,14 @@ export const createCommentSchema = z.object({
 export class ListUpdatesDto extends createZodDto(listUpdatesSchema) {}
 export class MissingUpdatesDto extends createZodDto(missingUpdatesSchema) {}
 export class CreateCommentDto extends createZodDto(createCommentSchema) {}
+
+// ── Task-scoped work logging (v2) ────────────────────────────────────────────
+
+export const logTaskWorkSchema = z.object({
+  workDate: dateOnly,
+  hours: z.number().min(0).max(24), // 0 = committed for the day, not yet worked
+  note: z.string().trim().max(2000).nullable().optional(),
+  billable: z.boolean().optional(),
+});
+
+export class LogTaskWorkDto extends createZodDto(logTaskWorkSchema) {}
