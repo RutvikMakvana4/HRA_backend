@@ -38,6 +38,7 @@ import {
   ListWeeksDto,
   LogTaskWorkDto,
   MissingUpdatesDto,
+  MyTasksQueryDto,
   UpdateClientDto,
   UpdateMilestoneDto,
   UpdateProgressDto,
@@ -370,6 +371,25 @@ export class MeProjectsController {
   @Get('projects')
   myProjects(@CurrentUser() actor: AuthenticatedUser) {
     return this.projects.myProjects(actor);
+  }
+}
+
+/**
+ * The actor's own tasks across every project — no membership check, deliberately (same
+ * reasoning as MeUpdatesController). `?date=` narrows to My Day. Shares the `me` path prefix
+ * with MeUpdatesController/MeProjectsController, ess's MeController and assets'
+ * MyAssetsController; the route segments don't collide.
+ */
+@ApiTags('projects')
+@ApiBearerAuth('access-token')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Controller('me')
+export class MeTasksController {
+  constructor(private readonly projects: ProjectsService) {}
+
+  @Get('tasks')
+  myTasks(@Query() query: MyTasksQueryDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.projects.myTasks(query, actor);
   }
 }
 

@@ -1,5 +1,5 @@
 import { forwardRef, HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, or, sql, type SQL } from 'drizzle-orm';
 import { alias, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { Database } from '../../db/client';
 import {
@@ -33,6 +33,7 @@ import type {
   ListProjectsDto,
   ListTasksDto,
   LogTaskWorkDto,
+  MyTasksQueryDto,
   UpdateClientDto,
   UpdateMilestoneDto,
   UpdateProgressDto,
@@ -766,6 +767,105 @@ export class ProjectsService {
       ...rest,
       hours: Math.round((minutes / 60) * 100) / 100,
       commentCount: countByEntry.get(rest.id) ?? 0,
+    }));
+  }
+
+  // ── My tasks (cross-project, v2) ───────────────────────────────────────────────
+
+  /**
+   * The actor's own tasks across EVERY project — no membership gate, deliberately (mirrors
+   * UpdatesService.listMyUpdates: this is the actor's own work, not a project-scoped read).
+   *
+   * `query.date` given => My Day: only the tasks the actor logged a timesheet entry against on
+   * that date (inner join on timesheet_entries), each returned with that day's hours + note.
+   *
+   * No date => all of the actor's work: assigned to them, or created by them and still
+   * unassigned (self-service pickup hasn't happened yet). Left-joined against today's entry so
+   * `hoursToday` is 0 rather than dropping the task when nothing has been logged yet today.
+   *
+   * Same two-alias provenance pattern as listTasks (assignee/assigner are two different rows of
+   * `employees`), plus a project join for `projectName` since this spans projects.
+   */
+  async myTasks(query: MyTasksQueryDto, actor: AuthenticatedUser) {
+    const assignee = alias(employees, 'assignee');
+    const assigner = alias(employees, 'assigner');
+    const statusOrder = sql`case ${projectTasks.status} when 'todo' then 0 when 'in_progress' then 1 when 'blocked' then 2 else 3 end`;
+
+    const archivedFilter = isNull(projectTasks.archivedAt);
+    const statusFilter = query.status ? eq(projectTasks.status, query.status) : undefined;
+
+    const baseSelect = {
+      id: projectTasks.id,
+      projectId: projectTasks.projectId,
+      projectName: projects.name,
+      title: projectTasks.title,
+      description: projectTasks.description,
+      assigneeEmployeeId: projectTasks.assigneeEmployeeId,
+      assigneeName: this.nameExpr(assignee),
+      assignedByEmployeeId: projectTasks.assignedByEmployeeId,
+      assignedByName: this.nameExpr(assigner),
+      assignedAt: projectTasks.assignedAt,
+      status: projectTasks.status,
+      priority: projectTasks.priority,
+      dueDate: projectTasks.dueDate,
+      milestoneId: projectTasks.milestoneId,
+      blockedReason: projectTasks.blockedReason,
+      createdBy: projectTasks.createdBy,
+      sortOrder: projectTasks.sortOrder,
+      createdAt: projectTasks.createdAt,
+    };
+
+    if (query.date) {
+      const rows = await this.db
+        .select({ ...baseSelect, minutes: timesheetEntries.minutes, note: timesheetEntries.taskDescription })
+        .from(projectTasks)
+        .innerJoin(
+          timesheetEntries,
+          and(
+            eq(timesheetEntries.taskId, projectTasks.id),
+            eq(timesheetEntries.employeeId, actor.id),
+            eq(timesheetEntries.workDate, query.date),
+          ),
+        )
+        .innerJoin(projects, eq(projects.id, projectTasks.projectId))
+        .leftJoin(assignee, eq(assignee.id, projectTasks.assigneeEmployeeId))
+        .leftJoin(assigner, eq(assigner.id, projectTasks.assignedByEmployeeId))
+        .where(and(archivedFilter, statusFilter))
+        .orderBy(statusOrder, sql`${projectTasks.dueDate} asc nulls last`);
+
+      return rows.map(({ minutes, ...rest }) => ({
+        ...rest,
+        hours: Math.round((minutes / 60) * 100) / 100,
+      }));
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const todayEntry = alias(timesheetEntries, 'todayEntry');
+    const ownershipFilter = or(
+      eq(projectTasks.assigneeEmployeeId, actor.id),
+      and(eq(projectTasks.createdBy, actor.id), isNull(projectTasks.assigneeEmployeeId)),
+    );
+
+    const rows = await this.db
+      .select({ ...baseSelect, minutesToday: todayEntry.minutes })
+      .from(projectTasks)
+      .innerJoin(projects, eq(projects.id, projectTasks.projectId))
+      .leftJoin(assignee, eq(assignee.id, projectTasks.assigneeEmployeeId))
+      .leftJoin(assigner, eq(assigner.id, projectTasks.assignedByEmployeeId))
+      .leftJoin(
+        todayEntry,
+        and(
+          eq(todayEntry.taskId, projectTasks.id),
+          eq(todayEntry.employeeId, actor.id),
+          eq(todayEntry.workDate, today),
+        ),
+      )
+      .where(and(archivedFilter, statusFilter, ownershipFilter))
+      .orderBy(statusOrder, sql`${projectTasks.dueDate} asc nulls last`);
+
+    return rows.map(({ minutesToday, ...rest }) => ({
+      ...rest,
+      hoursToday: Math.round(((minutesToday ?? 0) / 60) * 100) / 100,
     }));
   }
 

@@ -218,3 +218,12 @@ export const logTaskWorkSchema = z.object({
 });
 
 export class LogTaskWorkDto extends createZodDto(logTaskWorkSchema) {}
+
+// ── My tasks (cross-project, v2) ──────────────────────────────────────────────
+
+export const myTasksQuerySchema = z.object({
+  date: dateOnly.optional(),
+  status: z.enum(['todo', 'in_progress', 'blocked', 'done']).optional(),
+});
+
+export class MyTasksQueryDto extends createZodDto(myTasksQuerySchema) {}
