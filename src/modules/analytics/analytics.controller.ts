@@ -69,6 +69,11 @@ export class AnalyticsController {
     return this.analytics.utilization(query, actor);
   }
 
+  @Get('hours')
+  hours(@Query() query: UtilizationDto, @CurrentUser() actor: AuthenticatedUser) {
+    return this.analytics.hoursByEmployee(query, actor);
+  }
+
   @Get('recruitment-funnel')
   @Roles([...LEADERSHIP_ROLES])
   recruitmentFunnel(@Query() query: RecruitmentFunnelDto) {

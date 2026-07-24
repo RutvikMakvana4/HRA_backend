@@ -20,6 +20,7 @@ import { DRIZZLE } from '../../common/constants';
 import { AppError, ErrorCode } from '../../common/errors/app-error';
 import type { AuthenticatedUser } from '../../common/decorators/current-user.decorator';
 import { isAdminOrAbove, isManagerOrAbove } from '../auth/roles';
+import { splitMinutes } from '../timesheets/overtime.util';
 import type {
   AttendanceAnalyticsDto,
   AttritionDto,
@@ -221,6 +222,65 @@ export class AnalyticsService {
       totalHours: this.hours(total),
       utilizationPct: total > 0 ? this.round((billable / total) * 100) : 0,
     };
+  }
+
+  /**
+   * Per-employee regular (Mon–Sat) vs overtime (Sunday) hours from approved timesheets over a
+   * window, RBAC-scoped. Entries are summed per employee per day in SQL; the weekday split happens
+   * in JS via the shared `splitMinutes`/`isOvertimeDate` predicate (overtime.util.ts) so "what
+   * counts as overtime" has exactly one definition across the app.
+   */
+  async hoursByEmployee(query: UtilizationDto, actor: AuthenticatedUser) {
+    const to = query.to ?? this.today();
+    const from = query.from ?? this.monthStart(to);
+    const scope = await this.resolveScope(actor, query.scope);
+
+    const filters: SQL[] = [
+      eq(timesheetEntries.status, 'approved'),
+      gte(timesheetEntries.workDate, from),
+      lte(timesheetEntries.workDate, to),
+    ];
+    const scoped = this.scopeFilter(timesheetEntries.employeeId, scope);
+    if (scoped) filters.push(scoped);
+
+    const rows = await this.db
+      .select({
+        employeeId: timesheetEntries.employeeId,
+        employeeName: this.nameExpr(),
+        workDate: timesheetEntries.workDate,
+        minutes: sql<number>`cast(coalesce(sum(${timesheetEntries.minutes}), 0) as int)`,
+      })
+      .from(timesheetEntries)
+      .innerJoin(employees, eq(employees.id, timesheetEntries.employeeId))
+      .where(and(...filters))
+      .groupBy(
+        timesheetEntries.employeeId,
+        employees.displayName,
+        employees.firstName,
+        employees.lastName,
+        timesheetEntries.workDate,
+      );
+
+    const byEmployee = new Map<string, { employeeName: string | null; days: { workDate: string; minutes: number }[] }>();
+    for (const r of rows) {
+      const bucket = byEmployee.get(r.employeeId);
+      if (bucket) bucket.days.push({ workDate: r.workDate, minutes: r.minutes });
+      else byEmployee.set(r.employeeId, { employeeName: r.employeeName, days: [{ workDate: r.workDate, minutes: r.minutes }] });
+    }
+
+    const employeeRows = [...byEmployee.entries()].map(([employeeId, { employeeName, days }]) => {
+      const { regular, overtime } = splitMinutes(days);
+      return {
+        employeeId,
+        employeeName,
+        regularHours: this.hours(regular),
+        overtimeHours: this.hours(overtime),
+        totalHours: this.hours(regular + overtime),
+      };
+    });
+    employeeRows.sort((a, b) => b.totalHours - a.totalHours);
+
+    return { from, to, scope: scope.mode, employees: employeeRows };
   }
 
   // ── Recruitment ───────────────────────────────────────────────────────────────
@@ -501,6 +561,11 @@ export class AnalyticsService {
       sid: 'system',
       type: 'admin',
     };
+  }
+
+  /** Prefer the employee's display name, falling back to first + last (mirrors TimesheetsService). */
+  private nameExpr() {
+    return sql<string | null>`coalesce(${employees.displayName}, ${employees.firstName} || ' ' || ${employees.lastName})`;
   }
 
   private hours(minutes: number): number {
