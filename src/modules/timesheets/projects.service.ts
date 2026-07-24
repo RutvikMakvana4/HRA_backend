@@ -1,5 +1,5 @@
 import { HttpStatus, Inject, Injectable } from '@nestjs/common';
-import { and, asc, desc, eq, inArray, sql, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNull, sql, type SQL } from 'drizzle-orm';
 import { alias, type AnyPgColumn } from 'drizzle-orm/pg-core';
 import type { Database } from '../../db/client';
 import {
@@ -341,7 +341,7 @@ export class ProjectsService {
     const tasks = await this.db
       .select({ status: projectTasks.status, count: sql<number>`cast(count(*) as int)` })
       .from(projectTasks)
-      .where(eq(projectTasks.projectId, projectId))
+      .where(and(eq(projectTasks.projectId, projectId), isNull(projectTasks.archivedAt)))
       .groupBy(projectTasks.status);
 
     const [hours] = await this.db
@@ -505,7 +505,7 @@ export class ProjectsService {
     await this.getProjectRow(projectId);
     await this.assertCanViewProject(projectId, actor);
 
-    const filters = [eq(projectTasks.projectId, projectId)];
+    const filters = [eq(projectTasks.projectId, projectId), isNull(projectTasks.archivedAt)];
     if (query.status) filters.push(eq(projectTasks.status, query.status));
     if (query.assigneeId) filters.push(eq(projectTasks.assigneeEmployeeId, query.assigneeId));
 
@@ -668,7 +668,13 @@ export class ProjectsService {
         HttpStatus.FORBIDDEN,
       );
     }
-    await this.db.delete(projectTasks).where(eq(projectTasks.id, id));
+    // Soft-delete: archive rather than DELETE. A task with logged time can't be hard-deleted
+    // anyway (timesheet_entries.task_id is NOT NULL + ON DELETE restrict), and history must
+    // survive. Reads filter on `archivedAt IS NULL`.
+    await this.db
+      .update(projectTasks)
+      .set({ archivedAt: new Date() })
+      .where(eq(projectTasks.id, id));
     return { id };
   }
 
