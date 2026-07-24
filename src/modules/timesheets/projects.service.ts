@@ -714,10 +714,10 @@ export class ProjectsService {
   async logTaskWork(taskId: string, dto: LogTaskWorkDto, actor: AuthenticatedUser) {
     const [task] = await this.db.select().from(projectTasks).where(eq(projectTasks.id, taskId));
     if (!task) throw new AppError(ErrorCode.NOT_FOUND, 'Task not found', HttpStatus.NOT_FOUND);
+    await this.assertCanViewProject(task.projectId, actor);
     if (task.archivedAt) {
       throw new AppError(ErrorCode.BAD_REQUEST, 'Task is archived', HttpStatus.BAD_REQUEST);
     }
-    await this.assertCanViewProject(task.projectId, actor);
     return this.timesheetsService.upsertTaskEntry(taskId, task.projectId, dto, actor);
   }
 

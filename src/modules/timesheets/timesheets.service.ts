@@ -107,40 +107,28 @@ export class TimesheetsService {
     const minutes = Math.round(dto.hours * 60);
     const billable = dto.billable ?? project.defaultBillable;
 
-    const [existing] = await this.db
-      .select({ id: timesheetEntries.id })
-      .from(timesheetEntries)
-      .where(
-        and(
-          eq(timesheetEntries.weekId, week.id),
-          eq(timesheetEntries.taskId, taskId),
-          eq(timesheetEntries.workDate, dto.workDate),
-        ),
-      );
-
-    let row;
-    if (existing) {
-      [row] = await this.db
-        .update(timesheetEntries)
-        .set({ minutes, billable, taskDescription: dto.note ?? null, updatedAt: new Date() })
-        .where(eq(timesheetEntries.id, existing.id))
-        .returning(); // preserve id → comments survive
-    } else {
-      [row] = await this.db
-        .insert(timesheetEntries)
-        .values({
-          weekId: week.id,
-          employeeId: actor.id,
-          projectId,
-          taskId,
-          workDate: dto.workDate,
-          minutes,
-          billable,
-          taskDescription: dto.note ?? null,
-          status: 'draft',
-        })
-        .returning();
-    }
+    // Atomic upsert: a concurrent double-log of the same (week, task, work_date) must not
+    // race a select-then-branch into the uq_timesheet_entry_task_day unique constraint.
+    // ON CONFLICT DO UPDATE updates the existing row in place (id unchanged), so
+    // update_comments — keyed off entry_id — still survive.
+    const [row] = await this.db
+      .insert(timesheetEntries)
+      .values({
+        weekId: week.id,
+        employeeId: actor.id,
+        projectId,
+        taskId,
+        workDate: dto.workDate,
+        minutes,
+        billable,
+        taskDescription: dto.note ?? null,
+        status: 'draft',
+      })
+      .onConflictDoUpdate({
+        target: [timesheetEntries.weekId, timesheetEntries.taskId, timesheetEntries.workDate],
+        set: { minutes, billable, taskDescription: dto.note ?? null, updatedAt: new Date() },
+      })
+      .returning(); // preserve id → comments survive
     if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to log task work');
     await this.recomputeWeekTotal(week.id);
     return { ...row, hours: this.toHours(row.minutes) };
