@@ -147,6 +147,8 @@ export const projectTasks = pgTable(
     assignedAt: timestamp('assigned_at', { withTimezone: true }),
     status: taskStatus('status').notNull().default('todo'),
     priority: taskPriority('priority').notNull().default('medium'),
+    blockedReason: text('blocked_reason'),
+    archivedAt: timestamp('archived_at', { withTimezone: true }), // soft-delete: tasks are archived, never hard-deleted
     dueDate: date('due_date'),
     milestoneId: uuid('milestone_id').references(() => projectMilestones.id, {
       onDelete: 'set null',
@@ -232,11 +234,14 @@ export const timesheetEntries = pgTable(
     taskDescription: text('task_description'),
     category: text('category'),
     /**
-     * Optional task attribution. Deliberately NULLABLE: making it required would mean that on
-     * any day the task list is stale, people stop logging time at all — which would corrupt the
-     * timesheet data the rest of the platform depends on.
+     * Task attribution. NOT NULL as of v2 — tasks are primary, and every entry is keyed by
+     * (week, task, date) rather than (week, project, date). `restrict` (not `set null`) is safe
+     * because tasks are soft-deleted (see `archivedAt`), so a task row never disappears out from
+     * under an entry that references it.
      */
-    taskId: uuid('task_id').references(() => projectTasks.id, { onDelete: 'set null' }),
+    taskId: uuid('task_id')
+      .notNull()
+      .references(() => projectTasks.id, { onDelete: 'restrict' }),
     status: timesheetStatus('status').notNull().default('draft'),
     ...timestamps,
   },
@@ -244,11 +249,9 @@ export const timesheetEntries = pgTable(
     weekIdx: index('ix_timesheet_entries_week').on(t.weekId),
     employeeDateIdx: index('ix_timesheet_entries_employee_date').on(t.employeeId, t.workDate),
     projectIdx: index('ix_timesheet_entries_project').on(t.projectId),
-    // One row per cell. A week belongs to one employee, so (week, project, date) is
-    // the cell identity saveWeek diffs on; the DB enforces it too, so no code path
-    // (or concurrent save) can mint duplicate entries now that saveWeek no longer
-    // blanket-deletes and reinserts the week.
-    uniqCell: unique('uq_timesheet_entry_cell').on(t.weekId, t.projectId, t.workDate),
+    // One time+note entry per task per day per person (week scopes the employee). Replaces the
+    // v1 (week, project, date) cell key — v2 can log two tasks of the same project on one day.
+    uniqTaskDay: unique('uq_timesheet_entry_task_day').on(t.weekId, t.taskId, t.workDate),
   }),
 );
 

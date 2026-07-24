@@ -18,14 +18,7 @@ import type { AuthenticatedUser } from '../../common/decorators/current-user.dec
 import { isAdminOrAbove } from '../auth/roles';
 import { EmployeesService } from '../employees/employees.service';
 import { ProjectsService } from './projects.service';
-import type {
-  GetWeekDto,
-  ListWeeksDto,
-  SaveWeekDto,
-  UpdateEntryDto,
-  UpsertEntryDto,
-  UtilizationReportDto,
-} from './dto/timesheets.dto';
+import type { GetWeekDto, ListWeeksDto, UtilizationReportDto } from './dto/timesheets.dto';
 
 /** Standard working day for capacity (utilization denominator). Minutes. */
 const STANDARD_DAY_MINUTES = 8 * 60;
@@ -64,164 +57,14 @@ export class TimesheetsService {
 
   // ── Entries ──────────────────────────────────────────────────────────────────
 
-  /** Add or update the caller's entry for a (project, workDate) cell; ensures a draft week exists. */
-  async upsertEntry(dto: UpsertEntryDto, actor: AuthenticatedUser) {
-    const weekStart = this.mondayOf(dto.workDate);
-    const project = await this.projectsService.getProjectRow(dto.projectId);
-    const week = await this.ensureDraftWeek(actor.id, weekStart);
-    this.assertDraft(week);
-
-    const minutes = Math.round(dto.hours * 60);
-    const billable = dto.billable ?? project.defaultBillable;
-
-    const [existing] = await this.db
-      .select()
-      .from(timesheetEntries)
-      .where(
-        and(
-          eq(timesheetEntries.weekId, week.id),
-          eq(timesheetEntries.projectId, dto.projectId),
-          eq(timesheetEntries.workDate, dto.workDate),
-        ),
-      )
-      .limit(1);
-
-    let row;
-    if (existing) {
-      [row] = await this.db
-        .update(timesheetEntries)
-        .set({
-          minutes,
-          billable,
-          taskDescription: dto.taskDescription ?? existing.taskDescription,
-          category: dto.category ?? existing.category,
-          updatedAt: new Date(),
-        })
-        .where(eq(timesheetEntries.id, existing.id))
-        .returning();
-    } else {
-      [row] = await this.db
-        .insert(timesheetEntries)
-        .values({
-          weekId: week.id,
-          employeeId: actor.id,
-          projectId: dto.projectId,
-          workDate: dto.workDate,
-          minutes,
-          billable,
-          taskDescription: dto.taskDescription ?? null,
-          category: dto.category ?? null,
-          status: 'draft',
-        })
-        .returning();
-    }
-    if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to save entry');
-
-    await this.recomputeWeekTotal(week.id);
-    await this.record(actor, 'timesheet_entry.upsert', `timesheet_entry:${row.id}`, {
-      after: { projectId: dto.projectId, workDate: dto.workDate, minutes },
-    });
-
-    const warnings = await this.entryWarnings(actor.id, week.id, dto.workDate, dto.projectId);
-    return { ...row, hours: this.toHours(row.minutes), warnings };
-  }
-
-  /** Replace the caller's whole week with the supplied cells, in one transaction. Owner-only by construction. */
-  async saveWeek(dto: SaveWeekDto, actor: AuthenticatedUser) {
-    const weekStart = this.mondayOf(dto.weekStart);
-    const week = await this.ensureDraftWeek(actor.id, weekStart);
-    this.assertDraft(week);
-
-    const cells = dto.cells.filter((c) => c.hours > 0);
-    // Resolve each distinct project's default billable once.
-    const projectIds = [...new Set(cells.map((c) => c.projectId))];
-    const defaults = new Map<string, boolean>();
-    for (const pid of projectIds) {
-      const p = await this.projectsService.getProjectRow(pid); // 404s an unknown project
-      defaults.set(pid, p.defaultBillable);
-    }
-
-    await this.db.transaction(async (tx) => {
-      // Diff against the existing rows rather than deleting the whole week and
-      // reinserting. Entry ids must survive across saves: a comment references its
-      // entry (update_comments.entry_id, ON DELETE CASCADE), so a blanket delete
-      // would wipe every comment on that week's daily updates whenever an unrelated
-      // cell is edited. Match on (projectId, workDate) — the grid's one-cell-per-day
-      // key — updating survivors in place, inserting new cells, and deleting only the
-      // cells that are genuinely gone (whose update, and so whose comments, truly go).
-      const existing = await tx
-        .select({
-          id: timesheetEntries.id,
-          projectId: timesheetEntries.projectId,
-          workDate: timesheetEntries.workDate,
-        })
-        .from(timesheetEntries)
-        .where(eq(timesheetEntries.weekId, week.id));
-
-      const keyOf = (projectId: string, workDate: string) => `${projectId}|${workDate}`;
-      const existingByKey = new Map<string, string[]>();
-      for (const e of existing) {
-        const arr = existingByKey.get(keyOf(e.projectId, e.workDate));
-        if (arr) arr.push(e.id);
-        else existingByKey.set(keyOf(e.projectId, e.workDate), [e.id]);
-      }
-
-      const incomingKeys = new Set<string>();
-      for (const c of cells) {
-        const key = keyOf(c.projectId, c.workDate);
-        incomingKeys.add(key);
-        const values = {
-          minutes: Math.round(c.hours * 60),
-          billable: c.billable ?? defaults.get(c.projectId) ?? true,
-          taskDescription: c.taskDescription ?? null,
-          taskId: c.taskId ?? null,
-          status: 'draft' as const,
-          // Bump on the in-place update (the reinsert used to refresh it for free);
-          // matches upsertEntry / updateEntry, which set this explicitly.
-          updatedAt: new Date(),
-        };
-        const [keepId, ...dupIds] = existingByKey.get(key) ?? [];
-        if (keepId) {
-          // Preserve the surviving row's id; drop any stray duplicates for the key.
-          await tx
-            .update(timesheetEntries)
-            .set(values)
-            .where(eq(timesheetEntries.id, keepId));
-          if (dupIds.length) {
-            await tx
-              .delete(timesheetEntries)
-              .where(inArray(timesheetEntries.id, dupIds));
-          }
-        } else {
-          await tx.insert(timesheetEntries).values({
-            weekId: week.id,
-            employeeId: actor.id,
-            projectId: c.projectId,
-            workDate: c.workDate,
-            ...values,
-          });
-        }
-      }
-
-      const staleIds: string[] = [];
-      for (const [key, ids] of existingByKey) {
-        if (!incomingKeys.has(key)) staleIds.push(...ids);
-      }
-      if (staleIds.length) {
-        await tx.delete(timesheetEntries).where(inArray(timesheetEntries.id, staleIds));
-      }
-    });
-
-    await this.recomputeWeekTotal(week.id);
-    await this.record(actor, 'timesheet_week.save', `timesheet_week:${week.id}`, {
-      after: { cellCount: cells.length },
-    });
-
-    return this.weekPayload(actor.id, weekStart, week.id);
-  }
-
-  /** The getWeek-shaped payload plus week-level warnings — shared by saveWeek. */
-  private async weekPayload(employeeId: string, weekStart: string, weekId: string) {
+  /**
+   * The getWeek-shaped payload plus week-level warnings. The v1 grid write path (saveWeek) that
+   * called this was retired in the v2 (task-first) migration — `timesheet_entries.task_id` is now
+   * NOT NULL, and that path could only ever write a task-less entry. Kept (not `private`, since it
+   * has no caller left in this class yet and `noUnusedLocals` would flag a truly-unreachable
+   * private member) for the v2 write path (Task 3+) to return the same shape after a save.
+   */
+  async weekPayload(employeeId: string, weekStart: string, weekId: string) {
     const fresh = await this.getWeekRow(weekId);
     const entries = await this.entriesForWeek(weekId);
     const nonWorkingDays = await this.nonWorkingDays(employeeId, weekStart);
@@ -241,35 +84,6 @@ export class TimesheetsService {
       nonWorkingDays,
       warnings,
     };
-  }
-
-  async updateEntry(id: string, dto: UpdateEntryDto, actor: AuthenticatedUser) {
-    const entry = await this.getEntryRow(id);
-    if (entry.employeeId !== actor.id && !isAdminOrAbove(actor)) {
-      throw new AppError(ErrorCode.FORBIDDEN, 'Not allowed to edit this entry', HttpStatus.FORBIDDEN);
-    }
-    const week = await this.getWeekRow(entry.weekId);
-    this.assertDraft(week);
-    if (dto.projectId) await this.projectsService.getProjectRow(dto.projectId);
-
-    const patch: Partial<typeof timesheetEntries.$inferInsert> = { updatedAt: new Date() };
-    if (dto.hours !== undefined) patch.minutes = Math.round(dto.hours * 60);
-    if (dto.billable !== undefined) patch.billable = dto.billable;
-    if (dto.taskDescription !== undefined) patch.taskDescription = dto.taskDescription;
-    if (dto.category !== undefined) patch.category = dto.category;
-    if (dto.workDate !== undefined) {
-      if (this.mondayOf(dto.workDate) !== week.weekStartDate) {
-        throw new AppError(ErrorCode.VALIDATION_FAILED, 'workDate must fall within the entry’s week');
-      }
-      patch.workDate = dto.workDate;
-    }
-    if (dto.projectId !== undefined) patch.projectId = dto.projectId;
-
-    const [row] = await this.db.update(timesheetEntries).set(patch).where(eq(timesheetEntries.id, id)).returning();
-    if (!row) throw new AppError(ErrorCode.INTERNAL, 'Failed to update entry');
-    await this.recomputeWeekTotal(week.id);
-    await this.record(actor, 'timesheet_entry.update', `timesheet_entry:${id}`, { after: { minutes: row.minutes } });
-    return { ...row, hours: this.toHours(row.minutes) };
   }
 
   async deleteEntry(id: string, actor: AuthenticatedUser) {
@@ -488,7 +302,12 @@ export class TimesheetsService {
     return false;
   }
 
-  private async ensureDraftWeek(employeeId: string, weekStart: string): Promise<TimesheetWeek> {
+  /**
+   * Finds the caller's draft week for `weekStart`, creating it if absent. Both v1 write-path
+   * callers (saveWeek, upsertEntry) were retired in the v2 migration; kept (not `private`, for the
+   * same `noUnusedLocals` reason as `weekPayload` above) for the v2 write path (Task 3+).
+   */
+  async ensureDraftWeek(employeeId: string, weekStart: string): Promise<TimesheetWeek> {
     const existing = await this.findWeek(employeeId, weekStart);
     if (existing) return existing;
     const [row] = await this.db
@@ -531,21 +350,6 @@ export class TimesheetsService {
       .where(eq(timesheetEntries.weekId, weekId))
       .orderBy(asc(timesheetEntries.workDate));
     return rows.map((r) => ({ ...r, hours: this.toHours(r.minutes) }));
-  }
-
-  /** Warnings for a saved entry: over-max-day and non-working-day. */
-  private async entryWarnings(employeeId: string, weekId: string, workDate: string, _projectId: string): Promise<string[]> {
-    const warnings: string[] = [];
-    const [dayAgg] = await this.db
-      .select({ total: sql<number>`cast(coalesce(sum(${timesheetEntries.minutes}), 0) as int)` })
-      .from(timesheetEntries)
-      .where(and(eq(timesheetEntries.weekId, weekId), eq(timesheetEntries.workDate, workDate)));
-    if ((dayAgg?.total ?? 0) > MAX_DAILY_MINUTES) {
-      warnings.push(`Logged more than ${MAX_DAILY_MINUTES / 60}h on ${workDate}`);
-    }
-    const nonWorking = await this.nonWorkingReason(employeeId, workDate);
-    if (nonWorking) warnings.push(`${workDate} is a ${nonWorking}`);
-    return warnings;
   }
 
   /** For each of the week's 7 days, why (if any) it is a non-working day. */

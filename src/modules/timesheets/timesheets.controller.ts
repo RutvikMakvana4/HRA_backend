@@ -37,14 +37,11 @@ import {
   ListUpdatesDto,
   ListWeeksDto,
   MissingUpdatesDto,
-  SaveWeekDto,
   UpdateClientDto,
-  UpdateEntryDto,
   UpdateMilestoneDto,
   UpdateProgressDto,
   UpdateProjectDto,
   UpdateTaskDto,
-  UpsertEntryDto,
   UtilizationReportDto,
 } from './dto/timesheets.dto';
 
@@ -269,26 +266,6 @@ export class TimesheetsController {
   @Get('week')
   getWeek(@Query() query: GetWeekDto, @CurrentUser() actor: AuthenticatedUser) {
     return this.timesheets.getWeek(query, actor);
-  }
-
-  @Post('entries')
-  upsertEntry(@Body() dto: UpsertEntryDto, @CurrentUser() actor: AuthenticatedUser) {
-    return this.timesheets.upsertEntry(dto, actor);
-  }
-
-  @Post('week')
-  @HttpCode(HttpStatus.OK)
-  saveWeek(@Body() dto: SaveWeekDto, @CurrentUser() actor: AuthenticatedUser) {
-    return this.timesheets.saveWeek(dto, actor);
-  }
-
-  @Patch('entries/:id')
-  updateEntry(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateEntryDto,
-    @CurrentUser() actor: AuthenticatedUser,
-  ) {
-    return this.timesheets.updateEntry(id, dto, actor);
   }
 
   @Delete('entries/:id')
